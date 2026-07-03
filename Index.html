@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sistema de Devolución de EPP</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+<style>
+  :root {
+    --bg: #0c0a12; --surface: #15111e; --surface-2: #1c1729; --surface-3: #241d33;
+    --border: #2a233a; --border-bright: #3a3050; --fg: #f5f3f8; --fg-dim: #c8c2d4; --muted: #7a708a;
+    --accent: #a855f7; --accent-bright: #c084fc; --accent-2: #d946ef;
+    --success: #a3e635; --danger: #ef4444; --warning: #fbbf24;
+  }
+  * { -webkit-font-smoothing: antialiased; }
+  html, body { background: var(--bg); color: var(--fg); font-family: 'DM Sans', sans-serif; }
+  body { overflow-x: hidden; }
+  .font-display { font-family: 'Archivo', sans-serif; letter-spacing: -0.03em; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  .bg-grid { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(168,85,247,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(168,85,247,0.05) 1px, transparent 1px);
+    background-size: 64px 64px; mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 80%); animation: gridPan 60s linear infinite; }
+  @keyframes gridPan { from { background-position: 0 0; } to { background-position: 64px 64px; } }
+  .bg-glow { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(circle 600px at 15% 20%, rgba(168,85,247,0.1), transparent 60%), radial-gradient(circle 700px at 85% 80%, rgba(217,70,239,0.08), transparent 60%); }
+  .bg-noise { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.65 0 0 0 0 0.33 0 0 0 0 0.96 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .scanline { position: fixed; left: 0; right: 0; height: 1px; z-index: 1; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.3; animation: scan 8s linear infinite; }
+  @keyframes scan { 0% { top: -1px; opacity: 0; } 10% { opacity: 0.4; } 90% { opacity: 0.4; } 100% { top: 100vh; opacity: 0; } }
+
+  .header-bar { border-bottom: 1px solid var(--border); background: rgba(12,10,18,0.85); backdrop-filter: blur(12px); }
+  .brand-mark { background: linear-gradient(135deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.85); } }
+
+  .hero-title { font-family: 'Archivo', sans-serif; font-weight: 900; font-size: clamp(56px, 11vw, 160px); line-height: 0.88; letter-spacing: -0.05em; }
+  .hero-outline { -webkit-text-stroke: 2px var(--accent); color: transparent; }
+
+  .tech-card { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 28px; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+  .tech-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 40%, rgba(168,85,247,0.08) 100%); opacity: 0; transition: opacity 0.4s; }
+  .tech-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 30px 60px -20px rgba(168,85,247,0.2); }
+  .tech-card:hover::before { opacity: 1; }
+  .tech-card.disabled { opacity: 0.5; cursor: not-allowed; }
+  .tech-card.disabled:hover { border-color: var(--border); transform: none; box-shadow: none; }
+  .tech-card.disabled:hover::before { opacity: 0; }
+  .tech-card .arrow { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+  .tech-card:hover .arrow { transform: translate(8px, -8px); }
+
+  .field-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .field-label .req { color: var(--accent); }
+  .field-input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; padding: 14px 16px; color: var(--fg); font-size: 15px; font-family: 'DM Sans', sans-serif; transition: all 0.2s; }
+  .field-input.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; }
+  .field-input:focus { outline: none; border-color: var(--accent); background: var(--surface-3); box-shadow: 0 0 0 3px rgba(168,85,247,0.15); }
+  .field-input::placeholder { color: var(--muted); }
+  .field-input:read-only { background: var(--surface); color: var(--fg-dim); cursor: not-allowed; }
+  textarea.field-input { resize: vertical; min-height: 80px; }
+  select.field-input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a708a' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px; cursor: pointer; }
+  select.field-input option { background: var(--surface-2); color: var(--fg); }
+
+  .epp-checkbox { appearance: none; width: 18px; height: 18px; border: 1.5px solid var(--border-bright); border-radius: 3px; background: var(--surface-2); cursor: pointer; transition: all 0.15s; flex-shrink: 0; position: relative; }
+  .epp-checkbox:hover { border-color: var(--accent); }
+  .epp-checkbox:checked { background: var(--accent); border-color: var(--accent); }
+  .epp-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 5px; height: 9px; border: solid #000; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .epp-checkbox:indeterminate { background: var(--accent-2); border-color: var(--accent-2); }
+  .epp-checkbox:indeterminate::after { content: ''; position: absolute; left: 3px; top: 7px; width: 8px; height: 2px; background: #000; }
+
+  .section-header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .section-number { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #000; background: var(--accent); padding: 4px 10px; border-radius: 2px; letter-spacing: 0.1em; }
+  .section-title { font-family: 'Archivo', sans-serif; font-weight: 800; font-size: 28px; letter-spacing: -0.02em; }
+  .section-line { flex: 1; height: 1px; background: var(--border); }
+
+  .epp-card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .epp-card.missing { border-color: rgba(239,68,68,0.4); }
+  .epp-card.returned { border-color: rgba(163,230,53,0.2); }
+  .epp-card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+  .epp-card-tag { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; }
+
+  .condition-selector { display: flex; gap: 6px; align-items: flex-end; height: 56px; }
+  .condition-bar { flex: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 2px; cursor: pointer; transition: all 0.2s; position: relative; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--muted); }
+  .condition-bar:nth-child(1) { height: 30%; } .condition-bar:nth-child(2) { height: 45%; } .condition-bar:nth-child(3) { height: 60%; } .condition-bar:nth-child(4) { height: 80%; } .condition-bar:nth-child(5) { height: 100%; }
+  .condition-bar:hover { border-color: var(--accent); color: var(--fg); }
+  .condition-bar.active { color: #000; }
+  .condition-bar.active.danger { background: var(--danger); border-color: var(--danger); }
+  .condition-bar.active.warning { background: var(--warning); border-color: var(--warning); }
+  .condition-bar.active.success { background: var(--success); border-color: var(--success); }
+
+  .image-drop { border: 1.5px dashed var(--border-bright); border-radius: 3px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface-2); }
+  .image-drop:hover, .image-drop.dragover { border-color: var(--accent); background: rgba(168,85,247,0.05); }
+  .image-thumb { position: relative; aspect-ratio: 1; border-radius: 3px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
+  .image-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .image-thumb .remove-btn { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; background: rgba(0,0,0,0.8); color: #fff; border-radius: 2px; font-size: 11px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+  .image-thumb:hover .remove-btn { opacity: 1; }
+
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 2px; transition: all 0.2s; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: var(--accent-bright); transform: translateY(-1px); box-shadow: 0 8px 24px -8px rgba(168,85,247,0.6); }
+  .btn-ghost { background: transparent; color: var(--fg); border-color: var(--border-bright); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: transparent; color: var(--danger); border-color: rgba(239,68,68,0.3); }
+  .btn-danger:hover { background: rgba(239,68,68,0.1); }
+  .btn-sm { padding: 8px 14px; font-size: 10px; }
+  .btn-success-outline { background: transparent; color: var(--success); border-color: rgba(163,230,53,0.3); }
+  .btn-success-outline:hover { background: rgba(163,230,53,0.1); border-color: var(--success); }
+  .btn-xs { padding: 5px 10px; font-size: 9px; letter-spacing: 0.08em; }
+
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 24px; position: relative; overflow: hidden; }
+  .stat-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 0.4s; }
+  .stat-card:hover::after { transform: scaleX(1); }
+  .stat-value { font-family: 'Archivo', sans-serif; font-weight: 900; font-size: 48px; line-height: 1; letter-spacing: -0.04em; }
+  .stat-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
+
+  .submission-row { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 18px 22px; display: grid; grid-template-columns: 90px 1fr 130px 120px 100px 40px; gap: 18px; align-items: center; transition: all 0.2s; cursor: pointer; }
+  .submission-row:hover { border-color: var(--accent); background: var(--surface-2); transform: translateX(4px); }
+  @media (max-width: 900px) { .submission-row { grid-template-columns: 1fr; gap: 8px; } }
+
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+  .badge-pendiente { background: rgba(251,191,36,0.12); color: var(--warning); border: 1px solid rgba(251,191,36,0.3); }
+  .badge-revisado { background: rgba(163,230,53,0.12); color: var(--success); border: 1px solid rgba(163,230,53,0.3); }
+  .badge-archivado { background: rgba(122,112,138,0.12); color: var(--muted); border: 1px solid var(--border); }
+  .badge-danger { background: rgba(239,68,68,0.12); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+
+  .cond-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+
+  .toast { background: var(--surface-2); border: 1px solid var(--border-bright); border-left: 3px solid var(--accent); padding: 14px 18px; border-radius: 3px; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5); animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); min-width: 280px; }
+  .toast.success { border-left-color: var(--success); }
+  .toast.error { border-left-color: var(--danger); }
+  @keyframes toastIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fadeIn 0.2s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal-content { background: var(--surface); border: 1px solid var(--border-bright); border-radius: 4px; max-width: 980px; width: 100%; max-height: 90vh; overflow-y: auto; animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes modalIn { from { transform: scale(0.96) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  .view-enter { animation: viewEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes viewEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .marquee { overflow: hidden; white-space: nowrap; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); }
+  .marquee-track { display: inline-block; animation: marquee 40s linear infinite; }
+  @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  .success-circle { width: 80px; height: 80px; border-radius: 50%; background: var(--success); display: flex; align-items: center; justify-content: center; animation: successPop 0.5s cubic-bezier(0.16, 1.5, 0.3, 1); }
+  @keyframes successPop { 0% { transform: scale(0); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  .filter-tab { padding: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.2s; cursor: pointer; }
+  .filter-tab:hover { color: var(--fg); }
+  .filter-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .sub-nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 32px; flex-wrap: wrap; }
+  .sub-nav button { padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.2s; cursor: pointer; display: flex; align-items: center; gap: 8px; background: none; border-top: none; border-left: none; border-right: none; }
+  .sub-nav button:hover { color: var(--fg); }
+  .sub-nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .sub-nav .count { background: var(--surface-3); padding: 2px 8px; border-radius: 2px; font-size: 10px; color: var(--fg-dim); }
+  .sub-nav button.active .count { background: var(--accent); color: #000; }
+
+  .devuelto-toggle { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .devuelto-toggle button { padding: 10px 18px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); transition: all 0.2s; }
+  .devuelto-toggle button:hover { color: var(--fg); }
+  .devuelto-toggle button.active.devuelto { background: var(--success); color: #000; }
+  .devuelto-toggle button.active.no-devuelto { background: var(--danger); color: #fff; }
+
+  .comparison-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--surface-3); }
+  .comparison-bar .seg-devuelto { background: var(--success); }
+
+  .reassign-epp-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; transition: all 0.15s; border: 1px solid transparent; border-radius: 0; }
+  .reassign-epp-item:hover { background: var(--surface-2); }
+  .reassign-epp-item.selected { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.25); }
+
+  .confirm-list-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .confirm-list-item:last-child { border-bottom: none; }
+
+  .detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; }
+  .detail-grid .dl { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .detail-grid .dv { font-size: 14px; }
+
+  /* Asignación: tabla de EPPs */
+  .asign-epp-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  .asign-epp-row:hover { background: var(--surface-2); }
+  .asign-epp-row:last-child { border-bottom: none; }
+
+  .file-upload-area { border: 2px dashed var(--border-bright); border-radius: 4px; padding: 40px 28px; text-align: center; cursor: pointer; transition: all 0.3s; background: var(--surface); }
+  .file-upload-area:hover, .file-upload-area.dragover { border-color: var(--accent); background: rgba(168,85,247,0.04); }
+
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* ============================================================
+   SISTEMA DE DEVOLUCIÓN DE EPP — v4.3
+   ============================================================ */
+
+const ESTADO_LABELS = {
+  1: { label: 'CRÍTICO', color: 'danger' }, 2: { label: 'DEFICIENTE', color: 'danger' },
+  3: { label: 'REGULAR', color: 'warning' }, 4: { label: 'BUENO', color: 'success' },
+  5: { label: 'EXCELENTE', color: 'success' },
+};
+
+const state = {
+  currentView: 'landing', isSupervisor: false, supervisorTab: 'asignacion',
+  tecnicos: [], devoluciones: [], selectedTecnicoId: null, draft: null,
+  filter: { estado: 'all', search: '' },
+  reasignacion: { tecnicoOrigenId: '', tecnicoDestinoId: '', selectedEppIds: [] },
+  asignacion: { editingTecnicoId: null, newEpi: { producto: '', serie: '' } },
+};
+
+const STORAGE_KEY = 'epp_devolucion_v4_3_purple';
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) { const data = JSON.parse(raw); state.tecnicos = data.tecnicos || []; state.devoluciones = data.devoluciones || []; if (state.tecnicos.length === 0) seedSampleData(); }
+    else { seedSampleData(); }
+  } catch (e) { seedSampleData(); }
+}
+function saveToStorage() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ tecnicos: state.tecnicos, devoluciones: state.devoluciones })); } catch (e) { showToast('Almacenamiento lleno', 'error'); } }
+function uid(prefix) { return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4).toUpperCase(); }
+
+function seedSampleData() {
+  state.tecnicos = [
+    { id: 'TEC-001', nombreCompleto: 'Yong Ko', codigoProyecto: 'P2607.0090', epis: [
+      { id: uid('EPI'), producto: 'Avanti Runner', numeroSerie: 'S45F26' },
+      { id: uid('EPI'), producto: 'Smartphone', numeroSerie: 'IME98216' },
+      { id: uid('EPI'), producto: 'Guantes', numeroSerie: 'Sin serie' }
+    ], createdAt: Date.now() - 86400000 * 30 },
+    { id: 'TEC-002', nombreCompleto: 'Marco Odreman', codigoProyecto: 'P2607.0090', epis: [
+      { id: uid('EPI'), producto: 'Descensor ID', numeroSerie: 'F58B32' }
+    ], createdAt: Date.now() - 86400000 * 20 },
+    { id: 'TEC-003', nombreCompleto: 'Jose Caballer', codigoProyecto: 'P2607.0017', epis: [
+      { id: uid('EPI'), producto: 'Autodescensor SE', numeroSerie: 'Sin serie' }
+    ], createdAt: Date.now() - 86400000 * 15 },
+    { id: 'TEC-004', nombreCompleto: 'Carlos Mesquita', codigoProyecto: 'P2507.0163', epis: [
+      { id: uid('EPI'), producto: 'Descensor ID', numeroSerie: 'FEF564' }
+    ], createdAt: Date.now() - 86400000 * 10 },
+  ];
+  const now = Date.now();
+  state.devoluciones = [
+    { id: 'DEV-001', tecnicoId: 'TEC-001', timestamp: now - 86400000 * 2, tecnico: { nombreCompleto: 'Yong Ko', codigoProyecto: 'P2607.0090' }, items: [
+      { epiId: state.tecnicos[0].epis[0].id, producto: 'Avanti Runner', numeroSerieAsignado: 'S45F26', numeroSerieDevuelto: 'S45F26', devuelto: true, estado: 4, imagenes: [], motivoDiferencia: '' },
+      { epiId: state.tecnicos[0].epis[1].id, producto: 'Smartphone', numeroSerieAsignado: 'IME98216', numeroSerieDevuelto: 'IME98216', devuelto: true, estado: 5, imagenes: [], motivoDiferencia: '' }
+    ], estado: 'revisado' },
+    { id: 'DEV-002', tecnicoId: 'TEC-002', timestamp: now - 86400000, tecnico: { nombreCompleto: 'Marco Odreman', codigoProyecto: 'P2607.0090' }, items: [
+      { epiId: state.tecnicos[1].epis[0].id, producto: 'Descensor ID', numeroSerieAsignado: 'F58B32', numeroSerieDevuelto: 'F58B32', devuelto: true, estado: 3, imagenes: [], motivoDiferencia: '' }
+    ], estado: 'pendiente' },
+  ];
+  saveToStorage();
+}
+
+function fmtFecha(ts) { return new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function fmtHora(ts) { return new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }); }
+function timeAgo(ts) { const diff = Date.now() - ts; const h = Math.floor(diff / 3600000); if (h < 1) return `hace ${Math.floor(diff / 60000)} min`; if (h < 24) return `hace ${h} h`; return `hace ${Math.floor(h / 24)} d`; }
+
+function getProductoIcon(id) {
+  const l = (id || '').toLowerCase();
+  if (l.includes('casco') || l.includes('helmet')) return 'fa-helmet-safety';
+  if (l.includes('guante')) return 'fa-mitten';
+  if (l.includes('bota') || l.includes('runner') || l.includes('calzado')) return 'fa-shoe-prints';
+  if (l.includes('arnes') || l.includes('arnés')) return 'fa-link';
+  if (l.includes('respirador') || l.includes('mascara') || l.includes('máscara')) return 'fa-head-side-mask';
+  if (l.includes('auditiva') || l.includes('orejera') || l.includes('radio')) return 'fa-headphones';
+  if (l.includes('chaleco')) return 'fa-vest';
+  if (l.includes('smartphone') || l.includes('celular') || l.includes('telefono') || l.includes('teléfono') || l.includes('mobile')) return 'fa-mobile-screen';
+  if (l.includes('descensor')) return 'fa-arrows-down-to-line';
+  if (l.includes('autodescensor')) return 'fa-anchor';
+  if (l.includes('antiparras') || l.includes('gafas') || l.includes('lentes')) return 'fa-glasses';
+  if (l.includes('facial') || l.includes('careta')) return 'fa-shield-halved';
+  if (l.includes('rodillera')) return 'fa-person-falling';
+  return 'fa-toolbox';
+}
+
+function escapeHtml(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function genDevId() { const n = state.devoluciones.length + 1; return `DEV-${String(n).padStart(3, '0')}`; }
+function genTecId() { const n = state.tecnicos.length + 1; return `TEC-${String(n).padStart(3, '0')}`; }
+function getTecnicoById(id) { return state.tecnicos.find(t => t.id === id); }
+function getDevolucionesByTecnico(tecnicoId) { return state.devoluciones.filter(d => d.tecnicoId === tecnicoId); }
+
+function getEppStatus(tecnicoId) {
+  const tecnico = getTecnicoById(tecnicoId); if (!tecnico) return [];
+  const devoluciones = getDevolucionesByTecnico(tecnicoId);
+  return tecnico.epis.map(epi => {
+    let devuelto = false;
+    for (const dev of devoluciones) { const item = dev.items.find(i => i.epiId === epi.id); if (item && item.devuelto) { devuelto = true; break; } }
+    return { ...epi, devuelto };
+  });
+}
+
+function showToast(msg, type = 'info', duration = 3500) {
+  const c = document.getElementById('toasts'); if (!c) return;
+  const t = document.createElement('div'); t.className = `toast ${type}`;
+  const icon = type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-info';
+  const color = type === 'success' ? 'success' : type === 'error' ? 'danger' : 'accent';
+  t.innerHTML = `<div class="flex items-center gap-3"><i class="fa-solid ${icon} text-[var(--${color})]"></i><span class="text-sm">${msg}</span></div>`;
+  c.appendChild(t); setTimeout(() => { t.style.animation = 'toastIn 0.3s reverse'; setTimeout(() => t.remove(), 300); }, duration);
+}
+
+function compressImage(file, maxSize = 800, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader(); reader.onload = e => {
+      const img = new Image(); img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxSize) { height = (height * maxSize) / width; width = maxSize; }
+        else if (height > maxSize) { width = (width * maxSize) / height; height = maxSize; }
+        const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height); resolve(canvas.toDataURL('image/jpeg', quality));
+      }; img.onerror = reject; img.src = e.target.result;
+    }; reader.onerror = reject; reader.readAsDataURL(file);
+  });
+}
+
+function updateClock() { const el = document.getElementById('clock'); if (!el) return; const d = new Date(); el.textContent = `${d.toLocaleDateString('es-ES',{day:'2-digit',month:'short'}).toUpperCase()} · ${d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}`; }
+function setView(view) { if (!state.isSupervisor && view === 'supervisor') state.currentView = 'login'; else state.currentView = view; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+function closeModal() { const m = document.getElementById('modal-root'); if (m) m.innerHTML = ''; }
+
+/* ============================================================
+   RENDER PRINCIPAL
+   ============================================================ */
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = `<div class="bg-grid"></div><div class="bg-glow"></div><div class="bg-noise"></div><div class="scanline"></div>${renderHeader()}<main id="app" class="relative z-10"></main><div id="toasts" class="fixed bottom-6 right-6 z-[200] flex flex-col gap-2"></div><div id="modal-root"></div>`;
+  const app = document.getElementById('app');
+  let html = '';
+  if (state.currentView === 'landing') html = renderLanding();
+  else if (state.currentView === 'tecnico') html = renderTecnico();
+  else if (state.currentView === 'login') html = renderLogin();
+  else if (state.currentView === 'supervisor') html = renderSupervisor();
+  app.innerHTML = `<div class="view-enter">${html}</div>`;
+  afterRender();
+}
+
+function afterRender() {
+  if (state.currentView === 'tecnico') bindTecnico();
+  else if (state.currentView === 'login') { const input = document.getElementById('pin-input'); if (input) { input.addEventListener('keypress', (e) => { if (e.key === 'Enter') loginSupervisor(); }); input.focus(); } }
+  if (state.currentView === 'supervisor' && state.supervisorTab === 'reasignacion') {
+    const allCb = document.getElementById('cb-select-all-epp');
+    if (allCb) { const tec = getTecnicoById(state.reasignacion.tecnicoOrigenId); if (tec && tec.epis.length > 0) allCb.indeterminate = state.reasignacion.selectedEppIds.length > 0 && state.reasignacion.selectedEppIds.length < tec.epis.length; }
+  }
+  if (state.currentView === 'supervisor' && state.supervisorTab === 'asignacion') {
+    // Restaurar foco en campo de nuevo EPP si estaba editando
+    const prodInput = document.getElementById('new-epi-producto');
+    if (prodInput && state.asignacion.editingTecnicoId) prodInput.focus();
+  }
+}
+
+function renderHeader() {
+  return `
+    <header class="header-bar sticky top-0 z-50">
+      <div class="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between gap-6">
+        <div class="flex items-center gap-4 cursor-pointer" onclick="setView('landing')">
+          <div class="w-9 h-9 rounded-sm flex items-center justify-center" style="background:linear-gradient(135deg,var(--accent),var(--accent-2));"><i class="fa-solid fa-helmet-safety text-black text-base"></i></div>
+          <div><div class="font-display font-black text-base leading-none">EPP<span class="brand-mark">.DEV</span></div><div class="font-mono text-[9px] tracking-[0.2em] text-[var(--muted)] mt-1">SISTEMA DE DEVOLUCIÓN v4.3</div></div>
+        </div>
+        <div class="flex items-center gap-3 flex-wrap">
+          <button class="btn btn-ghost btn-sm ${state.currentView === 'landing' || state.currentView === 'tecnico' ? '!border-[var(--accent)] !text-[var(--accent)]' : ''}" onclick="setView('landing')"><i class="fa-solid fa-house"></i> <span class="hidden sm:inline">INICIO</span></button>
+          ${state.isSupervisor ? `
+            <button class="btn btn-ghost btn-sm ${state.currentView === 'supervisor' ? '!border-[var(--accent)] !text-[var(--accent)]' : ''}" onclick="setView('supervisor')"><i class="fa-solid fa-chart-line"></i> <span class="hidden sm:inline">SUPERVISOR</span></button>
+            <button class="btn btn-ghost btn-sm" onclick="logoutSupervisor()"><i class="fa-solid fa-right-from-bracket"></i> <span class="hidden sm:inline">SALIR</span></button>
+          ` : `<button class="btn btn-ghost btn-sm" onclick="setView('login')"><i class="fa-solid fa-lock"></i> <span class="hidden sm:inline">SUPERVISOR</span></button>`}
+          <div class="hidden sm:flex items-center gap-2 ml-2 pl-4 border-l border-[var(--border)]"><div class="status-dot"></div><span class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)]">EN LÍNEA</span></div>
+          <div id="clock" class="font-mono text-xs text-[var(--fg-dim)] hidden md:block"></div>
+        </div>
+      </div>
+    </header>`;
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+function renderLogin() {
+  return `
+    <section class="max-w-[500px] mx-auto px-6 py-20">
+      <div class="flex items-center gap-3 mb-8"><button onclick="setView('landing')" class="text-[var(--muted)] hover:text-[var(--accent)] transition font-mono text-xs tracking-[0.1em]"><i class="fa-solid fa-arrow-left mr-2"></i>VOLVER</button><div class="flex-1 h-px bg-[var(--border)]"></div></div>
+      <div class="text-center mb-10">
+        <div class="w-16 h-16 rounded-sm flex items-center justify-center mx-auto mb-6" style="background:rgba(217,70,239,0.1); border:1px solid rgba(217,70,239,0.3);"><i class="fa-solid fa-shield-halved text-[var(--accent-2)] text-2xl"></i></div>
+        <div class="font-mono text-[10px] tracking-[0.2em] text-[var(--accent-2)] mb-3">[ ACCESO RESTRINGIDO ]</div>
+        <h1 class="font-display font-black text-4xl tracking-tight mb-2">Panel de Supervisor</h1>
+        <p class="text-[var(--fg-dim)]">Ingrese su PIN para acceder al panel de gestión.</p>
+      </div>
+      <div class="bg-[var(--surface)] border border-[var(--border)] rounded p-8">
+        <div class="mb-6"><label class="field-label">PIN de Acceso</label><input type="password" id="pin-input" class="field-input mono text-center text-2xl tracking-[0.5em]" placeholder="••••" maxlength="4" inputmode="numeric"></div>
+        <button class="btn btn-primary w-full justify-center" onclick="loginSupervisor()"><i class="fa-solid fa-right-to-bracket"></i> INGRESAR</button>
+        <div class="mt-4 text-center font-mono text-[10px] text-[var(--muted)]">PIN DEMO: 1234</div>
+      </div>
+    </section>`;
+}
+window.loginSupervisor = function() { const pin = document.getElementById('pin-input').value; if (pin === '1234') { state.isSupervisor = true; setView('supervisor'); showToast('Acceso concedido', 'success'); } else { showToast('PIN incorrecto', 'error'); const i = document.getElementById('pin-input'); i.value = ''; i.focus(); } };
+window.logoutSupervisor = function() { state.isSupervisor = false; setView('landing'); showToast('Sesión cerrada', 'info'); };
+
+/* ============================================================
+   LANDING
+   ============================================================ */
+function renderLanding() {
+  const totalEpp = state.tecnicos.reduce((s, t) => s + t.epis.length, 0);
+  const pendientes = state.devoluciones.filter(d => d.estado === 'pendiente').length;
+  return `
+    <section class="max-w-[1400px] mx-auto px-6 pt-20 pb-12">
+      <div class="flex items-center gap-3 mb-8"><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--accent)]">[ 001 ]</span><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--muted)]">PROTOCOLO DE DEVOLUCIÓN DE EPP // ${new Date().getFullYear()}</span></div>
+      <h1 class="hero-title">DEVOLUCIÓN<br><span class="hero-outline">DE EPP</span><br>INDUSTRIAL<span style="color:var(--accent)">.</span></h1>
+      <div class="mt-12 grid md:grid-cols-2 gap-12 items-end">
+        <p class="text-lg md:text-xl text-[var(--fg-dim)] leading-relaxed max-w-xl">Sistema estandarizado para la devolución de Equipos de Protección Individual. Seleccione al técnico, registre el estado de cada EPP asignado y documente la evidencia.</p>
+        <div class="grid grid-cols-3 gap-6">
+          <div><div class="font-display font-black text-3xl text-[var(--accent)]">${state.tecnicos.length}</div><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mt-1">TÉCNICOS</div></div>
+          <div><div class="font-display font-black text-3xl">${totalEpp}</div><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mt-1">EPP ASIGNADOS</div></div>
+          <div><div class="font-display font-black text-3xl">${pendientes}</div><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mt-1">POR REVISAR</div></div>
+        </div>
+      </div>
+    </section>
+    <section class="max-w-[1400px] mx-auto px-6 py-16">
+      <div class="flex items-center gap-4 mb-10"><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--accent)]">[ 002 ]</span><h2 class="font-display font-black text-2xl tracking-tight">SELECCIONE TÉCNICO</h2><div class="flex-1 h-px bg-[var(--border)]"></div><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--muted)]">${state.tecnicos.length} REGISTROS</span></div>
+      ${state.tecnicos.length === 0 ? `
+        <div class="text-center py-20 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-users-slash text-5xl text-[var(--muted)] mb-4"></i><div class="font-display font-bold text-xl mb-2">SIN TÉCNICOS REGISTRADOS</div><div class="text-sm text-[var(--muted)] mb-6">Acceda al panel de Supervisor para cargar técnicos</div><button class="btn btn-primary" onclick="setView('login')"><i class="fa-solid fa-lock"></i> Acceso Supervisor</button></div>
+      ` : `<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">${state.tecnicos.map(t => renderTechCard(t)).join('')}</div>`}
+    </section>
+    <div class="marquee mt-12 py-3"><div class="marquee-track font-mono text-[11px] tracking-[0.2em] text-[var(--muted)]">${Array(4).fill('PROTOCOLO DE DEVOLUCIÓN EPP · CONFORMIDAD NORMATIVA · TRAZABILIDAD DE EQUIPOS · GESTIÓN DE FALTANTES · EVIDENCIA FOTOGRÁFICA · ').join('')}</div></div>`;
+}
+
+function renderTechCard(t) {
+  const es = getEppStatus(t.id); const total = es.length; const devueltos = es.filter(e => e.devuelto).length; const faltantes = total - devueltos;
+  const isComplete = faltantes === 0; const tienePend = getDevolucionesByTecnico(t.id).some(d => d.estado === 'pendiente');
+  return `
+    <div class="tech-card ${isComplete ? 'disabled' : ''}" ${isComplete ? '' : `onclick="seleccionarTecnico('${t.id}')"`}>
+      <div class="flex items-start justify-between mb-6">
+        <div class="w-12 h-12 rounded-sm flex items-center justify-center" style="background:${isComplete ? 'rgba(163,230,53,0.1); border:1px solid rgba(163,230,53,0.2)' : 'rgba(168,85,247,0.1); border:1px solid rgba(168,85,247,0.2)'}"><i class="fa-solid ${isComplete ? 'fa-circle-check' : 'fa-user-gear'} text-[var(--${isComplete ? 'success' : 'accent'})]"></i></div>
+        <i class="fa-solid ${isComplete ? 'fa-lock' : 'fa-arrow-up-right-from-square'} arrow text-[var(--muted)]"></i>
+      </div>
+      <div class="font-mono text-[10px] tracking-[0.15em] text-[var(--accent)] mb-2">${escapeHtml(t.codigoProyecto)}</div>
+      <h3 class="font-display font-black text-2xl tracking-tight mb-1">${escapeHtml(t.nombreCompleto)}</h3>
+      <div class="font-mono text-xs text-[var(--muted)] mb-5">${total} EPP asignados · ${devueltos} devueltos</div>
+      <div class="flex items-center justify-between pt-4 border-t border-[var(--border)]">
+        <div>${faltantes > 0 ? `<span class="font-mono text-xs text-[var(--danger)]">${faltantes} faltante${faltantes>1?'s':''}</span>` : `<span class="font-mono text-xs text-[var(--success)] font-bold">AL DÍA</span>`}</div>
+        ${tienePend ? '<span class="badge badge-pendiente">pendiente</span>' : ''}
+      </div>
+    </div>`;
+}
+
+/* ============================================================
+   FORMULARIO DEVOLUCIÓN
+   ============================================================ */
+window.seleccionarTecnico = function(id) {
+  const t = getTecnicoById(id); if (!t) return;
+  const pendingEpp = getEppStatus(t.id).filter(e => !e.devuelto);
+  if (pendingEpp.length === 0) { showToast('Este técnico no tiene EPP pendientes de devolución.', 'info'); return; }
+  state.selectedTecnicoId = id;
+  state.draft = { tecnicoId: id, items: pendingEpp.map(epi => ({ epiId: epi.id, producto: epi.producto, numeroSerieAsignado: epi.numeroSerie, numeroSerieDevuelto: '', devuelto: false, estado: 0, imagenes: [], motivoDiferencia: '' })) };
+  state.currentView = 'tecnico'; render();
+};
+
+function renderTecnico() {
+  const t = getTecnicoById(state.selectedTecnicoId); if (!t || !state.draft) { setView('landing'); return ''; }
+  const d = state.draft; const totalItems = d.items.length; const completados = d.items.filter(i => i.devuelto ? i.estado > 0 : true).length; const totalImagenes = d.items.reduce((s, i) => s + i.imagenes.length, 0);
+  return `
+    <section class="max-w-[1100px] mx-auto px-6 py-12">
+      <div class="flex items-center gap-3 mb-6"><button onclick="setView('landing')" class="text-[var(--muted)] hover:text-[var(--accent)] transition font-mono text-xs tracking-[0.1em]"><i class="fa-solid fa-arrow-left mr-2"></i>VOLVER</button><div class="flex-1 h-px bg-[var(--border)]"></div><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--muted)]">BORRADOR AUTOGUARDADO</span></div>
+      <h1 class="font-display font-black text-5xl md:text-6xl tracking-tight mb-3">Formulario de Devolución</h1>
+      <p class="text-[var(--fg-dim)] mb-12 max-w-2xl">Registre el estado de cada EPP asignado. Los campos marcados <span class="text-[var(--accent)] font-mono">[REQ]</span> son obligatorios.</p>
+      <form id="dev-form" onsubmit="return false;">
+        <div class="mb-16">
+          <div class="section-header"><span class="section-number">SEC / 01</span><h2 class="section-title">Datos Generales</h2><div class="section-line"></div><span class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)]">PERSONAL</span></div>
+          <div class="grid md:grid-cols-2 gap-5">
+            <div><label class="field-label">Nombre Completo</label><input type="text" class="field-input" value="${escapeHtml(t.nombreCompleto)}" readonly></div>
+            <div><label class="field-label">Código de Proyecto</label><input type="text" class="field-input mono" value="${escapeHtml(t.codigoProyecto)}" readonly></div>
+          </div>
+        </div>
+        <div class="mb-12">
+          <div class="section-header"><span class="section-number">SEC / 02</span><h2 class="section-title">EPP Asignados</h2><div class="section-line"></div><span class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)]" id="progress-text">${totalItems} EQUIPOS · ${completados} COMPLETOS · ${totalImagenes} IMÁGENES</span></div>
+          <div class="space-y-5">${d.items.map((item, idx) => renderEppFormItem(item, idx)).join('')}</div>
+          <div class="mt-6 p-4 bg-[var(--surface)] border border-[var(--border)] rounded flex items-center gap-4">
+            <div class="flex-1"><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mb-2">PROGRESO</div><div class="comparison-bar" style="height:8px;" id="progress-bar"><div class="seg-devuelto" style="width:${(completados/totalItems)*100}%"></div></div></div>
+            <div class="font-mono text-sm font-bold" id="progress-count">${completados}/${totalItems}</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-4 pt-8 border-t border-[var(--border)]">
+          <button type="button" id="cancel-btn" class="btn btn-ghost"><i class="fa-solid fa-xmark"></i> Cancelar</button>
+          <button type="button" id="submit-btn" class="btn btn-primary"><i class="fa-solid fa-paper-plane"></i> Enviar Devolución</button>
+        </div>
+      </form>
+    </section>`;
+}
+
+function renderEppFormItem(item, idx) {
+  const num = String(idx + 1).padStart(2, '0');
+  const serieDiffiere = item.numeroSerieDevuelto.trim() !== '' && item.numeroSerieDevuelto.trim().toLowerCase() !== item.numeroSerieAsignado.trim().toLowerCase();
+  return `
+    <div class="epp-card ${item.devuelto ? 'returned' : 'missing'}" data-epi-id="${item.epiId}">
+      <div class="epp-card-header">
+        <div class="flex items-center gap-3"><span class="epp-card-tag">EPP / ${num}</span><div class="flex items-center gap-2"><i class="fa-solid ${getProductoIcon(item.producto)} text-[var(--accent)]"></i><span class="font-bold text-sm">${escapeHtml(item.producto)}</span></div></div>
+        <div class="devuelto-toggle" data-epi-id="${item.epiId}"><button class="${item.devuelto ? 'active devuelto' : ''}" data-val="true">Devuelto</button><button class="${!item.devuelto ? 'active no-devuelto' : ''}" data-val="false">No devuelto</button></div>
+      </div>
+      <div class="p-6">
+        <div class="mb-6"><label class="field-label">Número de Serie Asignado</label><input type="text" class="field-input mono" value="${escapeHtml(item.numeroSerieAsignado)}" readonly></div>
+        ${item.devuelto ? `
+          <div class="mb-6"><label class="field-label">Número de Serie Devuelto</label><input type="text" class="field-input mono" value="${escapeHtml(item.numeroSerieDevuelto)}" oninput="saveSerie('${item.epiId}', this.value)" onblur="checkSerieDiff('${item.epiId}')" onkeydown="if(event.key==='Enter'){this.blur();}" placeholder="Ingrese el número de serie del equipo devuelto"></div>
+          ${serieDiffiere ? `<div class="mb-6 p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded" style="animation:slideIn 0.3s ease;"><label class="field-label text-[var(--danger)]">Motivo de diferencia de serie <span class="req">[REQ]</span></label><textarea class="field-input" rows="2" oninput="updateMotivo('${item.epiId}', this.value)" placeholder="Explique por qué el número de serie no coincide...">${escapeHtml(item.motivoDiferencia)}</textarea></div>` : ''}
+          <div class="mb-6">
+            <label class="field-label">Estado de Condición <span class="req">[REQ]</span></label>
+            <div class="condition-selector" data-epi-id="${item.epiId}">${[1,2,3,4,5].map(n => `<div class="condition-bar ${item.estado >= n ? `active ${ESTADO_LABELS[n].color}` : ''}" data-rate="${n}">${n}</div>`).join('')}</div>
+            <div class="flex justify-between mt-2 font-mono text-[10px] tracking-[0.1em] text-[var(--muted)]"><span>CRÍTICO</span><span class="estado-label" data-epi-id="${item.epiId}" style="color:${item.estado ? `var(--${ESTADO_LABELS[item.estado].color === 'danger' ? 'danger' : ESTADO_LABELS[item.estado].color === 'warning' ? 'warning' : 'success'})` : 'var(--muted)'}">${item.estado ? ESTADO_LABELS[item.estado].label : 'SIN CALIFICAR'}</span><span>EXCELENTE</span></div>
+          </div>
+          <div>
+            <label class="field-label">Imágenes de Evidencia <span class="text-[var(--muted)]">[MÁX 5]</span></label>
+            <div id="img-container-${item.epiId}">
+              ${item.imagenes.length > 0 ? `<div class="grid grid-cols-4 sm:grid-cols-5 gap-2 mb-3">${item.imagenes.map((img, i) => `<div class="image-thumb"><img src="${img}" alt="Evidencia ${i+1}"><button type="button" class="remove-btn" onclick="removeImagen('${item.epiId}', ${i})"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}</div>` : ''}
+              ${item.imagenes.length < 5 ? `<div class="image-drop" onclick="triggerUpload('${item.epiId}')" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event, '${item.epiId}')"><i class="fa-solid fa-cloud-arrow-up text-[var(--accent)] text-2xl mb-2"></i><div class="text-sm">Arrastre imágenes o haga clic</div><div class="font-mono text-[10px] text-[var(--muted)] mt-1">JPG/PNG · MÁX 5MB</div><input type="file" accept="image/*" multiple class="hidden" id="file-input-${item.epiId}" onchange="handleFileSelect(event, '${item.epiId}')"></div>` : ''}
+            </div>
+          </div>
+        ` : `<div class="p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation text-[var(--danger)]"></i><div><div class="font-bold text-sm text-[var(--danger)]">Equipo no devuelto</div><div class="text-xs text-[var(--muted)]">Se marcará como faltante en el reporte</div></div></div>`}
+      </div>
+    </div>`;
+}
+
+function bindTecnico() {
+  document.getElementById('cancel-btn').addEventListener('click', () => { state.draft = null; state.selectedTecnicoId = null; setView('landing'); });
+  document.getElementById('submit-btn').addEventListener('click', submitDevolucion);
+  document.querySelectorAll('.devuelto-toggle').forEach(toggle => { toggle.querySelectorAll('button').forEach(btn => { btn.addEventListener('click', () => { const epiId = toggle.dataset.epiId; const val = btn.dataset.val === 'true'; const item = state.draft.items.find(i => i.epiId === epiId); if (!item) return; item.devuelto = val; if (!val) { item.estado = 0; item.imagenes = []; item.motivoDiferencia = ''; } render(); }); }); });
+  document.querySelectorAll('.condition-selector').forEach(sel => { sel.querySelectorAll('.condition-bar').forEach(bar => { bar.addEventListener('click', () => { setEstado(sel.dataset.epiId, parseInt(bar.dataset.rate)); }); }); });
+}
+
+/* Serie: guardar sin re-render, comparar solo on blur */
+window.saveSerie = function(epiId, value) { const item = state.draft.items.find(i => i.epiId === epiId); if (item) item.numeroSerieDevuelto = value; };
+window.checkSerieDiff = function(epiId) { render(); };
+window.updateMotivo = function(epiId, value) { const item = state.draft.items.find(i => i.epiId === epiId); if (item) item.motivoDiferencia = value; };
+
+window.setEstado = function(epiId, rate) {
+  const item = state.draft.items.find(i => i.epiId === epiId); if (!item) return; item.estado = rate;
+  const sel = document.querySelector(`.condition-selector[data-epi-id="${epiId}"]`);
+  if (sel) sel.querySelectorAll('.condition-bar').forEach((bar, idx) => { const n = idx + 1; bar.className = 'condition-bar' + (rate >= n ? ` active ${ESTADO_LABELS[n].color}` : ''); });
+  const lbl = document.querySelector(`.estado-label[data-epi-id="${epiId}"]`);
+  if (lbl) { const c = ESTADO_LABELS[rate]; lbl.style.color = `var(--${c.color === 'danger' ? 'danger' : c.color === 'warning' ? 'warning' : 'success'})`; lbl.textContent = c.label; }
+  updateProgress();
+};
+
+function updateProgress() {
+  const d = state.draft; if (!d) return; const total = d.items.length;
+  const completos = d.items.filter(i => i.devuelto ? i.estado > 0 : true).length; const totalImg = d.items.reduce((s, i) => s + i.imagenes.length, 0);
+  const pt = document.getElementById('progress-text'); if (pt) pt.textContent = `${total} EQUIPOS · ${completos} COMPLETOS · ${totalImg} IMÁGENES`;
+  const bar = document.getElementById('progress-bar'); if (bar) bar.innerHTML = `<div class="seg-devuelto" style="width:${(completos/total)*100}%"></div>`;
+  const cnt = document.getElementById('progress-count'); if (cnt) cnt.textContent = `${completos}/${total}`;
+}
+
+window.triggerUpload = function(epiId) { document.getElementById(`file-input-${epiId}`).click(); };
+window.handleFileSelect = async function(e, epiId) { await addImagenes(epiId, Array.from(e.target.files)); e.target.value = ''; };
+window.handleDrop = async function(e, epiId) { e.preventDefault(); e.currentTarget.classList.remove('dragover'); await addImagenes(epiId, Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'))); };
+async function addImagenes(epiId, files) {
+  const item = state.draft.items.find(i => i.epiId === epiId); if (!item) return;
+  const rem = 5 - item.imagenes.length; if (rem <= 0) { showToast('Máximo 5 imágenes', 'error'); return; }
+  const proc = files.slice(0, rem); if (files.length > rem) showToast(`Solo ${rem} imagen(es)`, 'error');
+  for (const f of proc) { if (f.size > 5*1024*1024) { showToast(`${f.name} excede 5MB`, 'error'); continue; } try { item.imagenes.push(await compressImage(f)); } catch(e) { showToast(`Error: ${f.name}`, 'error'); } }
+  render();
+}
+window.removeImagen = function(epiId, idx) { const item = state.draft.items.find(i => i.epiId === epiId); if (item) { item.imagenes.splice(idx, 1); render(); } };
+
+function submitDevolucion() {
+  const d = state.draft; const t = getTecnicoById(state.selectedTecnicoId); if (!d || !t) return;
+  const errores = [];
+  d.items.forEach((item, idx) => { if (item.devuelto) { if (!item.estado) errores.push(`EPP ${idx+1}: debe calificar el estado`); const isDiff = item.numeroSerieDevuelto.trim().toLowerCase() !== item.numeroSerieAsignado.trim().toLowerCase() && item.numeroSerieDevuelto.trim() !== ''; if (isDiff && !item.motivoDiferencia.trim()) errores.push(`EPP ${idx+1}: motive la diferencia de serie`); } });
+  if (errores.length > 0) { showToast(errores[0], 'error'); return; }
+  const dev = { id: genDevId(), tecnicoId: t.id, timestamp: Date.now(), tecnico: { nombreCompleto: t.nombreCompleto, codigoProyecto: t.codigoProyecto }, items: d.items.map(i => ({...i})), estado: 'pendiente' };
+  state.devoluciones.push(dev); saveToStorage(); state.draft = null; state.selectedTecnicoId = null; showSuccessModal(dev.id);
+}
+
+function showSuccessModal(devId) {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
+      <div class="modal-content max-w-[500px] p-12 text-center">
+        <div class="success-circle mx-auto mb-6"><i class="fa-solid fa-check text-black text-3xl"></i></div>
+        <h2 class="font-display font-black text-3xl tracking-tight mb-2">Devolución Registrada</h2>
+        <p class="text-[var(--fg-dim)] mb-2">El reporte ha sido guardado exitosamente.</p>
+        <div class="font-mono text-sm text-[var(--accent)] mb-8">${devId}</div>
+        <button class="btn btn-primary" onclick="closeModal(); setView('landing');"><i class="fa-solid fa-house"></i> Volver al Inicio</button>
+      </div>
+    </div>`;
+}
+
+/* ============================================================
+   SUPERVISOR (3 pestañas)
+   ============================================================ */
+function renderSupervisor() {
+  const pend = state.devoluciones.filter(d => d.estado === 'pendiente').length;
+  const rev = state.devoluciones.filter(d => d.estado === 'revisado').length;
+  const arch = state.devoluciones.filter(d => d.estado === 'archivado').length;
+  const totalEpp = state.tecnicos.reduce((s, t) => s + t.epis.length, 0);
+
+  return `
+    <section class="max-w-[1400px] mx-auto px-6 py-12">
+      <div class="flex items-center gap-3 mb-4"><span class="font-mono text-[10px] tracking-[0.2em] text-[var(--accent)]">[ PANEL SUPERVISOR ]</span><div class="flex-1 h-px bg-[var(--border)]"></div></div>
+      <h1 class="font-display font-black text-5xl tracking-tight mb-2">Gestión de EPP</h1>
+      <p class="text-[var(--fg-dim)] mb-10 max-w-2xl">Asigne equipos, revise devoluciones y reasigne EPPs entre técnicos.</p>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-10">
+        <div class="stat-card"><div class="stat-value text-[var(--fg)]">${state.tecnicos.length}</div><div class="stat-label mt-2">TÉCNICOS</div></div>
+        <div class="stat-card"><div class="stat-value text-[var(--accent)]">${totalEpp}</div><div class="stat-label mt-2">EPP TOTAL</div></div>
+        <div class="stat-card"><div class="stat-value text-[var(--warning)]">${pend}</div><div class="stat-label mt-2">PENDIENTES</div></div>
+        <div class="stat-card"><div class="stat-value text-[var(--success)]">${rev}</div><div class="stat-label mt-2">REVISADOS</div></div>
+        <div class="stat-card"><div class="stat-value">${arch}</div><div class="stat-label mt-2">ARCHIVADOS</div></div>
+      </div>
+      <div class="sub-nav">
+        <button class="${state.supervisorTab === 'asignacion' ? 'active' : ''}" onclick="switchSupervisorTab('asignacion')"><i class="fa-solid fa-box-open"></i> Asignación Equipo <span class="count">${state.tecnicos.length}</span></button>
+        <button class="${state.supervisorTab === 'devoluciones' ? 'active' : ''}" onclick="switchSupervisorTab('devoluciones')"><i class="fa-solid fa-rotate-left"></i> Devoluciones <span class="count">${state.devoluciones.length}</span></button>
+        <button class="${state.supervisorTab === 'reasignacion' ? 'active' : ''}" onclick="switchSupervisorTab('reasignacion')"><i class="fa-solid fa-arrows-rotate"></i> Reasignación EPP</button>
+      </div>
+      ${state.supervisorTab === 'asignacion' ? renderTabAsignacion() : state.supervisorTab === 'devoluciones' ? renderTabDevoluciones() : renderTabReasignacion()}
+    </section>`;
+}
+
+window.switchSupervisorTab = function(tab) {
+  state.supervisorTab = tab;
+  if (tab === 'reasignacion') state.reasignacion = { tecnicoOrigenId: '', tecnicoDestinoId: '', selectedEppIds: [] };
+  if (tab === 'asignacion') state.asignacion = { editingTecnicoId: null, newEpi: { producto: '', serie: '' } };
+  state.filter = { estado: 'all', search: '' };
+  render();
+};
+
+/* ============================================================
+   TAB 1: ASIGNACIÓN DE EQUIPO
+   ============================================================ */
+function renderTabAsignacion() {
+  const a = state.asignacion;
+  const editingTec = a.editingTecnicoId ? getTecnicoById(a.editingTecnicoId) : null;
+
+  return `
+    <div class="grid lg:grid-cols-3 gap-8">
+      <!-- Columna izquierda: Agregar técnico + lista -->
+      <div class="lg:col-span-1">
+        <div class="mb-6">
+          <div class="section-header" style="margin-bottom:16px;"><span class="section-number">01</span><h3 class="section-title" style="font-size:20px;">Agregar Técnico</h3></div>
+          <div class="space-y-3">
+            <div><label class="field-label">Nombre Completo <span class="req">[REQ]</span></label><input type="text" id="new-tec-nombre" class="field-input" placeholder="Ej: Juan Pérez" style="padding:12px 14px; font-size:14px;"></div>
+            <div><label class="field-label">Código de Proyecto <span class="req">[REQ]</span></label><input type="text" id="new-tec-proyecto" class="field-input mono" placeholder="Ej: P2607.0090" style="padding:12px 14px; font-size:14px;"></div>
+            <button class="btn btn-primary w-full justify-center" onclick="agregarTecnico()"><i class="fa-solid fa-user-plus"></i> AGREGAR</button>
+          </div>
+        </div>
+
+        <!-- Importar Excel -->
+        <div class="mb-6">
+          <div class="file-upload-area" onclick="document.getElementById('import-excel-input').click()" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="event.preventDefault(); this.classList.remove('dragover'); handleImportExcel(event.dataTransfer.files[0])">
+            <i class="fa-solid fa-file-excel text-[var(--success)] text-3xl mb-3"></i>
+            <div class="text-sm font-bold mb-1">Importar desde Excel</div>
+            <div class="font-mono text-[10px] text-[var(--muted)]">Columnas: Nombre, Proyecto, Producto, Serie</div>
+            <input type="file" accept=".xlsx,.xls,.csv" class="hidden" id="import-excel-input" onchange="handleImportExcel(this.files[0]); this.value='';">
+          </div>
+        </div>
+
+        <!-- Lista de técnicos -->
+        <div>
+          <div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mb-3">TÉCNICOS REGISTRADOS (${state.tecnicos.length})</div>
+          <div class="space-y-2 max-h-[400px] overflow-y-auto">
+            ${state.tecnicos.length === 0 ? '<div class="text-xs text-[var(--muted)] text-center py-8">No hay técnicos</div>' : ''}
+            ${state.tecnicos.map(t => `
+              <div class="p-3 rounded border ${a.editingTecnicoId === t.id ? 'border-[var(--accent)] bg-[rgba(168,85,247,0.06)]' : 'border-[var(--border)] bg-[var(--surface)]'} cursor-pointer transition hover:border-[var(--accent)]" onclick="selectTecnicoAsignacion('${t.id}')">
+                <div class="flex items-center justify-between">
+                  <div class="min-w-0">
+                    <div class="font-bold text-sm truncate">${escapeHtml(t.nombreCompleto)}</div>
+                    <div class="font-mono text-[10px] text-[var(--muted)]">${escapeHtml(t.codigoProyecto)}</div>
+                  </div>
+                  <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                    <span class="font-mono text-[10px] text-[var(--accent)]">${t.epis.length} EPP</span>
+                    <button class="btn btn-danger btn-xs" onclick="event.stopPropagation(); eliminarTecnico('${t.id}')" title="Eliminar técnico"><i class="fa-solid fa-trash"></i></button>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Columna derecha: EPPs del técnico seleccionado -->
+      <div class="lg:col-span-2">
+        ${!editingTec ? `
+          <div class="text-center py-20 border border-dashed border-[var(--border)] rounded">
+            <i class="fa-solid fa-hand-pointer text-4xl text-[var(--muted)] mb-4"></i>
+            <div class="font-display font-bold text-lg mb-2">Seleccione un Técnico</div>
+            <div class="text-sm text-[var(--muted)]">Haga clic en un técnico de la lista para ver y gestionar sus EPPs asignados</div>
+          </div>
+        ` : `
+          <div class="mb-6">
+            <div class="section-header" style="margin-bottom:16px;"><span class="section-number">02</span><h3 class="section-title" style="font-size:20px;">EPPs de ${escapeHtml(editingTec.nombreCompleto)}</h3><div class="section-line"></div><span class="font-mono text-[10px] text-[var(--muted)]">${editingTec.epis.length} EQUIPOS</span></div>
+
+            <!-- Agregar EPP -->
+            <div class="bg-[var(--surface)] border border-[var(--border)] rounded p-5 mb-5">
+              <div class="font-mono text-[10px] tracking-[0.15em] text-[var(--accent)] mb-3">AGREGAR NUEVO EPP</div>
+              <div class="grid sm:grid-cols-2 gap-3">
+                <div><label class="field-label">Producto <span class="req">[REQ]</span></label><input type="text" id="new-epi-producto" class="field-input" value="${escapeHtml(a.newEpi.producto)}" oninput="state.asignacion.newEpi.producto=this.value" placeholder="Ej: Casco de seguridad" style="padding:12px 14px; font-size:14px;"></div>
+                <div><label class="field-label">Número de Serie</label><input type="text" id="new-epi-serie" class="field-input mono" value="${escapeHtml(a.newEpi.serie)}" oninput="state.asignacion.newEpi.serie=this.value" placeholder="Ej: SN-00123" style="padding:12px 14px; font-size:14px;" onkeydown="if(event.key==='Enter') agregarEppATecnico()"></div>
+              </div>
+              <button class="btn btn-primary btn-sm mt-3" onclick="agregarEppATecnico()"><i class="fa-solid fa-plus"></i> AGREGAR EPP</button>
+            </div>
+
+            <!-- Lista de EPPs -->
+            <div class="bg-[var(--surface)] border border-[var(--border)] rounded overflow-hidden">
+              ${editingTec.epis.length === 0 ? `
+                <div class="text-center py-12"><i class="fa-solid fa-box-open text-3xl text-[var(--muted)] mb-3"></i><div class="text-sm text-[var(--muted)]">Sin EPPs asignados. Use el formulario de arriba para agregar.</div></div>
+              ` : `
+                <div class="px-4 py-3 border-b border-[var(--border)] bg-[var(--surface-2)] grid grid-cols-[40px_1fr_1fr_80px] gap-3 items-center font-mono text-[9px] tracking-[0.15em] text-[var(--muted)]">
+                  <span></span><span>PRODUCTO</span><span>NÚMERO DE SERIE</span><span></span>
+                </div>
+                ${editingTec.epis.map(epi => `
+                  <div class="asign-epp-row grid grid-cols-[40px_1fr_1fr_80px] gap-3 items-center">
+                    <div class="w-8 h-8 rounded-sm flex items-center justify-center bg-[var(--surface-2)]"><i class="fa-solid ${getProductoIcon(epi.producto)} text-[var(--accent)] text-xs"></i></div>
+                    <span class="text-sm font-medium truncate">${escapeHtml(epi.producto)}</span>
+                    <span class="font-mono text-xs text-[var(--fg-dim)] truncate">${escapeHtml(epi.numeroSerie) || '<span class="text-[var(--muted)]">—</span>'}</span>
+                    <button class="btn btn-danger btn-xs justify-center" onclick="eliminarEppDeTecnico('${editingTec.id}','${epi.id}')"><i class="fa-solid fa-trash"></i></button>
+                  </div>
+                `).join('')}
+              `}
+            </div>
+          </div>
+        `}
+      </div>
+    </div>`;
+}
+
+window.selectTecnicoAsignacion = function(id) {
+  state.asignacion.editingTecnicoId = id;
+  state.asignacion.newEpi = { producto: '', serie: '' };
+  render();
+};
+
+window.agregarTecnico = function() {
+  const nombre = document.getElementById('new-tec-nombre').value.trim();
+  const proyecto = document.getElementById('new-tec-proyecto').value.trim();
+  if (!nombre) { showToast('Ingrese el nombre del técnico', 'error'); return; }
+  if (!proyecto) { showToast('Ingrese el código de proyecto', 'error'); return; }
+  const tec = { id: genTecId(), nombreCompleto: nombre, codigoProyecto: proyecto, epis: [], createdAt: Date.now() };
+  state.tecnicos.push(tec); saveToStorage(); render();
+  showToast(`Técnico ${nombre} agregado`, 'success');
+};
+
+window.eliminarTecnico = function(id) {
+  const tec = getTecnicoById(id); if (!tec) return;
+  // Confirmar con modal
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
+      <div class="modal-content max-w-[440px] p-8">
+        <div class="flex items-center gap-3 mb-4"><div class="w-10 h-10 rounded-sm flex items-center justify-center bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)]"><i class="fa-solid fa-triangle-exclamation text-[var(--danger)]"></i></div><h3 class="font-display font-bold text-xl">Eliminar Técnico</h3></div>
+        <p class="text-[var(--fg-dim)] mb-2">Se eliminará a <strong>${escapeHtml(tec.nombreCompleto)}</strong> y todos sus ${tec.epis.length} EPP(s) asignado(s).</p>
+        <p class="text-xs text-[var(--danger)] mb-6">Esta acción no se puede deshacer.</p>
+        <div class="flex gap-3">
+          <button class="btn btn-ghost flex-1 justify-center" onclick="closeModal()">Cancelar</button>
+          <button class="btn btn-danger flex-1 justify-center" onclick="confirmarEliminarTecnico('${id}')"><i class="fa-solid fa-trash"></i> Eliminar</button>
+        </div>
+      </div>
+    </div>`;
+};
+
+window.confirmarEliminarTecnico = function(id) {
+  state.tecnicos = state.tecnicos.filter(t => t.id !== id);
+  if (state.asignacion.editingTecnicoId === id) state.asignacion.editingTecnicoId = null;
+  saveToStorage(); closeModal(); render();
+  showToast('Técnico eliminado', 'info');
+};
+
+window.agregarEppATecnico = function() {
+  const a = state.asignacion;
+  if (!a.editingTecnicoId) return;
+  const prod = a.newEpi.producto.trim();
+  const serie = a.newEpi.serie.trim();
+  if (!prod) { showToast('Ingrese el nombre del producto', 'error'); return; }
+  const tec = getTecnicoById(a.editingTecnicoId); if (!tec) return;
+  tec.epis.push({ id: uid('EPI'), producto: prod, numeroSerie: serie || 'Sin serie' });
+  saveToStorage();
+  a.newEpi = { producto: '', serie: '' };
+  render();
+  showToast(`EPP "${prod}" asignado a ${tec.nombreCompleto}`, 'success');
+};
+
+window.eliminarEppDeTecnico = function(tecId, epiId) {
+  const tec = getTecnicoById(tecId); if (!tec) return;
+  tec.epis = tec.epis.filter(e => e.id !== epiId);
+  saveToStorage(); render();
+  showToast('EPP eliminado', 'info');
+};
+
+window.handleImportExcel = function(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (data.length < 2) { showToast('El archivo está vacío', 'error'); return; }
+
+      let agregados = 0;
+      // Agrupar por técnico (asumir filas con mismo nombre+proyecto)
+      const tecMap = {};
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i]; if (!row || !row[0]) continue;
+        const nombre = String(row[0] || '').trim();
+        const proyecto = String(row[1] || '').trim();
+        const producto = String(row[2] || '').trim();
+        const serie = String(row[3] || '').trim();
+        if (!nombre || !producto) continue;
+        const key = `${nombre}|||${proyecto}`;
+        if (!tecMap[key]) tecMap[key] = { nombre, proyecto, epis: [] };
+        tecMap[key].epis.push({ id: uid('EPI'), producto, numeroSerie: serie || 'Sin serie' });
+      }
+
+      for (const key in tecMap) {
+        const d = tecMap[key];
+        // Buscar si ya existe
+        let tec = state.tecnicos.find(t => t.nombreCompleto.toLowerCase() === d.nombre.toLowerCase() && t.codigoProyecto.toLowerCase() === d.proyecto.toLowerCase());
+        if (!tec) {
+          tec = { id: genTecId(), nombreCompleto: d.nombre, codigoProyecto: d.proyecto, epis: [], createdAt: Date.now() };
+          state.tecnicos.push(tec);
+        }
+        tec.epis.push(...d.epis);
+        agregados += d.epis.length;
+      }
+
+      saveToStorage(); render();
+      showToast(`Importados ${agregados} EPP(s) de ${Object.keys(tecMap).length} técnico(s)`, 'success');
+    } catch (err) { showToast('Error al leer el archivo Excel', 'error'); console.error(err); }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+/* ============================================================
+   TAB 2: DEVOLUCIONES
+   ============================================================ */
+function renderTabDevoluciones() {
+  let filtered = [...state.devoluciones].reverse();
+  if (state.filter.estado !== 'all') filtered = filtered.filter(d => d.estado === state.filter.estado);
+  if (state.filter.search.trim()) { const q = state.filter.search.toLowerCase(); filtered = filtered.filter(d => d.tecnico.nombreCompleto.toLowerCase().includes(q) || d.id.toLowerCase().includes(q) || d.tecnico.codigoProyecto.toLowerCase().includes(q)); }
+
+  return `
+    <div class="flex flex-wrap items-center gap-3 mb-6">
+      <div class="flex gap-1">${['all','pendiente','revisado','archivado'].map(e => `<button class="filter-tab ${state.filter.estado === e ? 'active' : ''}" onclick="setFilterEstado('${e}')">${e === 'all' ? 'TODOS' : e.toUpperCase()}</button>`).join('')}</div>
+      <div class="flex-1"></div>
+      <input type="text" class="field-input mono text-xs" style="max-width:260px; padding:10px 14px;" placeholder="Buscar..." value="${escapeHtml(state.filter.search)}" oninput="setFilterSearch(this.value)">
+    </div>
+    ${filtered.length === 0 ? `<div class="text-center py-16 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-inbox text-4xl text-[var(--muted)] mb-4"></i><div class="font-display font-bold text-lg mb-1">Sin resultados</div></div>` : `
+      <div class="hidden md:grid mb-2 px-5 font-mono text-[10px] tracking-[0.15em] text-[var(--muted)]" style="grid-template-columns: 90px 1fr 130px 120px 100px 40px; gap:18px; align-items:center;"><span>ID</span><span>TÉCNICO</span><span>FECHA</span><span>ESTADO</span><span>ITEMS</span><span></span></div>
+      <div class="space-y-2">${filtered.map(d => renderSubmissionRow(d)).join('')}</div>
+    `}
+    <div class="mt-8"><button class="btn btn-ghost btn-sm" onclick="exportarExcel()"><i class="fa-solid fa-file-excel"></i> EXPORTAR EXCEL</button></div>`;
+}
+
+function renderSubmissionRow(d) {
+  const devueltos = d.items.filter(i => i.devuelto).length; const faltantes = d.items.length - devueltos;
+  const bc = d.estado === 'pendiente' ? 'badge-pendiente' : d.estado === 'revisado' ? 'badge-revisado' : 'badge-archivado';
+  return `
+    <div class="submission-row" onclick="verDetalleDevolucion('${d.id}')">
+      <span class="font-mono text-xs font-bold text-[var(--accent)]">${d.id}</span>
+      <div><div class="font-bold text-sm">${escapeHtml(d.tecnico.nombreCompleto)}</div><div class="font-mono text-[10px] text-[var(--muted)]">${escapeHtml(d.tecnico.codigoProyecto)}</div></div>
+      <div><div class="text-sm">${fmtFecha(d.timestamp)}</div><div class="font-mono text-[10px] text-[var(--muted)]">${fmtHora(d.timestamp)}</div></div>
+      <span class="badge ${bc}">${d.estado}</span>
+      <div class="font-mono text-xs"><span class="text-[var(--success)]">${devueltos}</span>${faltantes > 0 ? ` <span class="text-[var(--muted)]">/</span> <span class="text-[var(--danger)]">${faltantes}</span>` : ''}</div>
+      <i class="fa-solid fa-chevron-right text-[var(--muted)] text-xs"></i>
+    </div>`;
+}
+
+window.setFilterEstado = function(e) { state.filter.estado = e; render(); };
+window.setFilterSearch = function(v) { state.filter.search = v; render(); };
+
+window.verDetalleDevolucion = function(devId) {
+  const d = state.devoluciones.find(x => x.id === devId); if (!d) return;
+  const bc = d.estado === 'pendiente' ? 'badge-pendiente' : d.estado === 'revisado' ? 'badge-revisado' : 'badge-archivado';
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
+      <div class="modal-content" style="max-width:800px;">
+        <div class="p-6 border-b border-[var(--border)] flex items-center justify-between">
+          <div class="flex items-center gap-4"><span class="font-mono text-sm font-bold text-[var(--accent)]">${d.id}</span><span class="badge ${bc}">${d.estado}</span></div>
+          <button onclick="closeModal()" class="text-[var(--muted)] hover:text-[var(--fg)] transition text-xl"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="p-6">
+          <div class="detail-grid mb-8">
+            <span class="dl">Técnico</span><span class="dv font-bold">${escapeHtml(d.tecnico.nombreCompleto)}</span>
+            <span class="dl">Proyecto</span><span class="dv font-mono">${escapeHtml(d.tecnico.codigoProyecto)}</span>
+            <span class="dl">Fecha</span><span class="dv">${fmtFecha(d.timestamp)} · ${fmtHora(d.timestamp)}</span>
+            <span class="dl">Hace</span><span class="dv text-[var(--muted)]">${timeAgo(d.timestamp)}</span>
+          </div>
+          <div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mb-4">DETALLE DE EQUIPOS</div>
+          <div class="space-y-3">${d.items.map(item => {
+            const cond = item.devuelto && item.estado ? ESTADO_LABELS[item.estado] : null;
+            const cc = cond ? (cond.color === 'danger' ? 'var(--danger)' : cond.color === 'warning' ? 'var(--warning)' : 'var(--success)') : 'var(--muted)';
+            return `<div class="p-4 rounded border border-[var(--border)] ${!item.devuelto ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--surface-2)]'}">
+              <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-2"><i class="fa-solid ${getProductoIcon(item.producto)} text-[var(--accent)] text-sm"></i><span class="font-bold text-sm">${escapeHtml(item.producto)}</span>${!item.devuelto ? '<span class="badge badge-danger text-[9px]">FALTANTE</span>' : ''}</div>${cond ? `<span class="cond-pill" style="background:${cc}22;color:${cc};">${cond.label}</span>` : ''}</div>
+              <div class="grid grid-cols-2 gap-2 font-mono text-[11px]"><div><span class="text-[var(--muted)]">Serie asignada:</span> ${escapeHtml(item.numeroSerieAsignado)}</div><div><span class="text-[var(--muted)]">Serie devuelta:</span> <span class="${item.devuelto && item.numeroSerieDevuelto.trim().toLowerCase() !== item.numeroSerieAsignado.trim().toLowerCase() ? 'text-[var(--warning)]' : ''}">${item.devuelto ? escapeHtml(item.numeroSerieDevuelto) : '—'}</span></div></div>
+              ${item.motivoDiferencia ? `<div class="mt-2 text-xs text-[var(--warning)]"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Motivo: ${escapeHtml(item.motivoDiferencia)}</div>` : ''}
+              ${item.imagenes.length > 0 ? `<div class="grid grid-cols-5 gap-1 mt-3">${item.imagenes.map(img => `<div class="aspect-square rounded overflow-hidden border border-[var(--border)]"><img src="${img}" class="w-full h-full object-cover"></div>`).join('')}</div>` : ''}
+            </div>`;
+          }).join('')}</div>
+          <div class="flex flex-wrap gap-3 mt-8 pt-6 border-t border-[var(--border)]">
+            ${d.estado === 'pendiente' ? `<button class="btn btn-success-outline btn-sm" onclick="cambiarEstadoDev('${d.id}','revisado')"><i class="fa-solid fa-check"></i> MARCAR REVISADO</button><button class="btn btn-danger btn-sm" onclick="eliminarDevolucion('${d.id}')"><i class="fa-solid fa-trash"></i> ELIMINAR</button>` : ''}
+            ${d.estado === 'revisado' ? `<button class="btn btn-ghost btn-sm" onclick="cambiarEstadoDev('${d.id}','archivado')"><i class="fa-solid fa-box-archive"></i> ARCHIVAR</button>` : ''}
+            ${d.estado === 'archivado' ? `<button class="btn btn-ghost btn-sm" onclick="cambiarEstadoDev('${d.id}','pendiente')"><i class="fa-solid fa-rotate-left"></i> REABRIR</button>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+};
+
+window.cambiarEstadoDev = function(devId, nuevoEstado) { const d = state.devoluciones.find(x => x.id === devId); if (d) { d.estado = nuevoEstado; saveToStorage(); closeModal(); render(); showToast(`${devId} → ${nuevoEstado}`, 'success'); } };
+window.eliminarDevolucion = function(devId) { state.devoluciones = state.devoluciones.filter(x => x.id !== devId); saveToStorage(); closeModal(); render(); showToast(`${devId} eliminada`, 'info'); };
+
+window.exportarExcel = function() {
+  if (state.devoluciones.length === 0) { showToast('No hay datos', 'error'); return; }
+  const rows = [];
+  state.devoluciones.forEach(d => { d.items.forEach(item => { rows.push({ 'ID Devolución': d.id, 'Técnico': d.tecnico.nombreCompleto, 'Proyecto': d.tecnico.codigoProyecto, 'Fecha': fmtFecha(d.timestamp), 'Hora': fmtHora(d.timestamp), 'Producto': item.producto, 'Serie Asignada': item.numeroSerieAsignado, 'Serie Devuelta': item.devuelto ? item.numeroSerieDevuelto : 'NO DEVUELTO', 'Estado': item.devuelto ? (ESTADO_LABELS[item.estado] ? ESTADO_LABELS[item.estado].label : 'N/A') : 'FALTANTE', 'Motivo Diferencia': item.motivoDiferencia || '', 'Estado Devolución': d.estado }); }); });
+  const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Devoluciones');
+  XLSX.writeFile(wb, `Devoluciones_EPP_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Excel descargado', 'success');
+};
+
+/* ============================================================
+   TAB 3: REASIGNACIÓN EPP (MULTISELECT)
+   ============================================================ */
+function renderTabReasignacion() {
+  const r = state.reasignacion;
+  const tecOrigen = r.tecnicoOrigenId ? getTecnicoById(r.tecnicoOrigenId) : null;
+  const episOrigen = tecOrigen ? tecOrigen.epis : [];
+  const allSel = episOrigen.length > 0 && r.selectedEppIds.length === episOrigen.length;
+  const tecDestino = r.tecnicoDestinoId ? getTecnicoById(r.tecnicoDestinoId) : null;
+
+  return `
+    <div class="grid lg:grid-cols-2 gap-8">
+      <div>
+        <div class="section-header"><span class="section-number">01</span><h3 class="section-title" style="font-size:22px;">Técnico Origen</h3><div class="section-line"></div></div>
+        <select class="field-input" onchange="selectTecnicoOrigen(this.value)">
+          <option value="">-- Seleccione técnico --</option>
+          ${state.tecnicos.map(t => `<option value="${t.id}" ${r.tecnicoOrigenId === t.id ? 'selected' : ''}>${escapeHtml(t.nombreCompleto)} (${escapeHtml(t.codigoProyecto)}) — ${t.epis.length} EPP</option>`).join('')}
+        </select>
+        ${episOrigen.length > 0 ? `
+          <div class="mt-5 bg-[var(--surface)] border border-[var(--border)] rounded overflow-hidden">
+            <label class="flex items-center gap-3 cursor-pointer p-4 border-b border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition">
+              <input type="checkbox" id="cb-select-all-epp" class="epp-checkbox" ${allSel ? 'checked' : ''} onchange="toggleAllEpp(this.checked)">
+              <span class="font-mono text-xs font-bold tracking-wider text-[var(--accent)]">SELECCIONAR TODOS (${episOrigen.length})</span>
+            </label>
+            <div class="divide-y divide-[var(--border)]">${episOrigen.map(epi => {
+              const isSel = r.selectedEppIds.includes(epi.id);
+              return `<label class="reassign-epp-item ${isSel ? 'selected' : ''}" onclick="toggleEppLabel(event,'${epi.id}')">
+                <input type="checkbox" class="epp-checkbox" ${isSel ? 'checked' : ''} onchange="toggleEpp('${epi.id}',this.checked)" onclick="event.stopPropagation()">
+                <i class="fa-solid ${getProductoIcon(epi.producto)} text-[var(--accent)] text-sm w-5 text-center flex-shrink-0"></i>
+                <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">${escapeHtml(epi.producto)}</div><div class="font-mono text-[10px] text-[var(--muted)] truncate">${escapeHtml(epi.numeroSerie)}</div></div>
+                ${isSel ? '<i class="fa-solid fa-circle-check text-[var(--accent)] text-sm flex-shrink-0"></i>' : ''}
+              </label>`;
+            }).join('')}</div>
+          </div>
+          <div class="mt-3 flex items-center gap-3"><div class="comparison-bar flex-1" style="height:4px;"><div class="seg-devuelto" style="width:${episOrigen.length > 0 ? (r.selectedEppIds.length / episOrigen.length * 100) : 0}%"></div></div><span class="font-mono text-[10px] text-[var(--muted)]">${r.selectedEppIds.length} / ${episOrigen.length}</span></div>
+        ` : r.tecnicoOrigenId ? `<div class="mt-5 text-center py-10 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-box-open text-3xl text-[var(--muted)] mb-3"></i><div class="text-sm text-[var(--muted)]">Sin EPPs asignados</div></div>` : `<div class="mt-5 text-center py-10 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-arrow-up-from-bracket text-3xl text-[var(--muted)] mb-3"></i><div class="text-sm text-[var(--muted)]">Seleccione un técnico</div></div>`}
+      </div>
+      <div>
+        <div class="section-header"><span class="section-number">02</span><h3 class="section-title" style="font-size:22px;">Técnico Destino</h3><div class="section-line"></div></div>
+        <select class="field-input" onchange="selectTecnicoDestino(this.value)" ${!r.tecnicoOrigenId ? 'disabled' : ''}>
+          <option value="">-- Seleccione técnico destino --</option>
+          ${state.tecnicos.filter(t => t.id !== r.tecnicoOrigenId).map(t => `<option value="${t.id}" ${r.tecnicoDestinoId === t.id ? 'selected' : ''}>${escapeHtml(t.nombreCompleto)} (${escapeHtml(t.codigoProyecto)}) — ${t.epis.length} EPP</option>`).join('')}
+        </select>
+        ${tecDestino ? `<div class="mt-5 bg-[var(--surface)] border border-[var(--border)] rounded p-4"><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mb-3">EPPS ACTUALES DEL DESTINO</div>${tecDestino.epis.length > 0 ? `<div class="space-y-2">${tecDestino.epis.map(epi => `<div class="flex items-center gap-2 py-1"><i class="fa-solid ${getProductoIcon(epi.producto)} text-[var(--muted)] text-xs w-4 text-center"></i><span class="text-xs">${escapeHtml(epi.producto)}</span><span class="font-mono text-[10px] text-[var(--muted)]">— ${escapeHtml(epi.numeroSerie)}</span></div>`).join('')}</div>` : '<div class="text-xs text-[var(--muted)]">Sin EPPs</div>'}</div>` : ''}
+        <button class="btn btn-primary w-full justify-center mt-6 ${r.selectedEppIds.length === 0 || !r.tecnicoDestinoId ? 'opacity-40 cursor-not-allowed' : ''}" onclick="confirmarReasignacion()"><i class="fa-solid fa-arrows-rotate"></i> REASIGNAR ${r.selectedEppIds.length > 0 ? r.selectedEppIds.length : ''} EPP${r.selectedEppIds.length !== 1 ? 'S' : ''}</button>
+      </div>
+    </div>`;
+}
+
+window.selectTecnicoOrigen = function(id) { state.reasignacion.tecnicoOrigenId = id; state.reasignacion.selectedEppIds = []; if (id === state.reasignacion.tecnicoDestinoId) state.reasignacion.tecnicoDestinoId = ''; render(); };
+window.selectTecnicoDestino = function(id) { state.reasignacion.tecnicoDestinoId = id; render(); };
+window.toggleAllEpp = function(checked) { const tec = getTecnicoById(state.reasignacion.tecnicoOrigenId); if (tec) state.reasignacion.selectedEppIds = checked ? tec.epis.map(e => e.id) : []; render(); };
+window.toggleEpp = function(epiId, checked) { const ids = state.reasignacion.selectedEppIds; if (checked && !ids.includes(epiId)) ids.push(epiId); if (!checked) state.reasignacion.selectedEppIds = ids.filter(id => id !== epiId); render(); };
+window.toggleEppLabel = function(event, epiId) { if (event.target.type === 'checkbox') return; const cb = event.currentTarget.querySelector('input[type="checkbox"]'); if (cb) { cb.checked = !cb.checked; toggleEpp(epiId, cb.checked); } };
+
+window.confirmarReasignacion = function() {
+  const r = state.reasignacion;
+  if (!r.tecnicoOrigenId) { showToast('Seleccione técnico de origen', 'error'); return; }
+  if (!r.tecnicoDestinoId) { showToast('Seleccione técnico de destino', 'error'); return; }
+  if (r.selectedEppIds.length === 0) { showToast('Seleccione al menos un EPP', 'error'); return; }
+  const orig = getTecnicoById(r.tecnicoOrigenId); const dest = getTecnicoById(r.tecnicoDestinoId);
+  const toMove = orig.epis.filter(e => r.selectedEppIds.includes(e.id));
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
+      <div class="modal-content" style="max-width:560px;">
+        <div class="p-6 border-b border-[var(--border)] flex items-center justify-between">
+          <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-sm flex items-center justify-center" style="background:rgba(217,70,239,0.1); border:1px solid rgba(217,70,239,0.3);"><i class="fa-solid fa-arrows-rotate text-[var(--accent-2)]"></i></div><div><div class="font-mono text-[10px] tracking-[0.15em] text-[var(--accent-2)]">CONFIRMAR</div><div class="font-display font-bold text-lg">${toMove.length} EPP${toMove.length !== 1 ? 'S' : ''}</div></div></div>
+          <button onclick="closeModal()" class="text-[var(--muted)] hover:text-[var(--fg)] transition text-xl"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="p-6">
+          <div class="flex items-center gap-4 mb-6">
+            <div class="flex-1 p-4 bg-[var(--surface-2)] border border-[var(--border)] rounded text-center"><div class="font-mono text-[9px] tracking-[0.15em] text-[var(--muted)] mb-1">ORIGEN</div><div class="font-bold text-sm">${escapeHtml(orig.nombreCompleto)}</div><div class="font-mono text-[10px] text-[var(--muted)]">${escapeHtml(orig.codigoProyecto)}</div></div>
+            <i class="fa-solid fa-arrow-right text-[var(--accent)] text-xl"></i>
+            <div class="flex-1 p-4 bg-[var(--surface-2)] border border-[var(--border)] rounded text-center"><div class="font-mono text-[9px] tracking-[0.15em] text-[var(--muted)] mb-1">DESTINO</div><div class="font-bold text-sm">${escapeHtml(dest.nombreCompleto)}</div><div class="font-mono text-[10px] text-[var(--muted)]">${escapeHtml(dest.codigoProyecto)}</div></div>
+          </div>
+          <div class="font-mono text-[10px] tracking-[0.15em] text-[var(--muted)] mb-3">EQUIPOS A REASIGNAR</div>
+          <div class="bg-[var(--surface-2)] border border-[var(--border)] rounded p-4 mb-6">${toMove.map(epi => `<div class="confirm-list-item"><i class="fa-solid ${getProductoIcon(epi.producto)} text-[var(--accent)] text-sm w-5 text-center"></i><span class="text-sm flex-1">${escapeHtml(epi.producto)}</span><span class="font-mono text-[10px] text-[var(--muted)]">${escapeHtml(epi.numeroSerie)}</span></div>`).join('')}</div>
+          <div class="flex gap-3"><button class="btn btn-ghost flex-1 justify-center" onclick="closeModal()"><i class="fa-solid fa-xmark"></i> CANCELAR</button><button class="btn btn-primary flex-1 justify-center" onclick="ejecutarReasignacion()"><i class="fa-solid fa-check"></i> CONFIRMAR</button></div>
+        </div>
+      </div>
+    </div>`;
+};
+
+window.ejecutarReasignacion = function() {
+  const r = state.reasignacion; const orig = getTecnicoById(r.tecnicoOrigenId); const dest = getTecnicoById(r.tecnicoDestinoId);
+  if (!orig || !dest) return;
+  const toMove = orig.epis.filter(e => r.selectedEppIds.includes(e.id));
+  dest.epis.push(...toMove); orig.epis = orig.epis.filter(e => !r.selectedEppIds.includes(e.id));
+  saveToStorage(); closeModal();
+  showToast(`${toMove.length} EPP reasignado(s) de ${orig.nombreCompleto} a ${dest.nombreCompleto}`, 'success');
+  state.reasignacion = { tecnicoOrigenId: '', tecnicoDestinoId: '', selectedEppIds: [] }; render();
+};
+
+/* ============================================================
+   INIT
+   ============================================================ */
+loadFromStorage();
+render();
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>
