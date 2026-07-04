@@ -125,7 +125,7 @@ select.field-input option{background:var(--surface-2);color:var(--fg)}
 .toast.success{border-left-color:var(--success)}
 .toast.error{border-left-color:var(--danger)}
 @keyframes toastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;animation:fadeIn 0.2s}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;animation:fadeIn 0.2s}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .modal-content{background:var(--surface);border:1px solid var(--border-bright);border-radius:4px;max-width:980px;width:100%;max-height:90vh;overflow-y:auto;animation:modalIn 0.3s cubic-bezier(0.16,1,0.3,1)}
 @keyframes modalIn{from{transform:scale(0.96) translateY(10px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
@@ -174,6 +174,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 </style>
 </head>
 <body>
+<!-- Z-index 2000 para que los toasts aparezcan por encima del visor de fotos -->
+<div id="toasts" class="fixed bottom-6 right-6 z-[2000] flex flex-col gap-2"></div>
 <div id="root"></div>
 <script>
 var EL={1:{label:'CRÍTICO',color:'danger'},2:{label:'DEFICIENTE',color:'danger'},3:{label:'REGULAR',color:'warning'},4:{label:'BUENO',color:'success'},5:{label:'EXCELENTE',color:'success'}};
@@ -211,18 +213,235 @@ function uClk(){var e=document.getElementById('clock');if(!e)return;var d=new Da
 function setV(v){if(!S.isSupervisor&&v==='supervisor')S.currentView='login';else S.currentView=v;ren();window.scrollTo({top:0,behavior:'smooth'})}
 function clM(){var m=document.getElementById('modal-root');if(m)m.innerHTML=''}
 
-/* FUNCIONALIDAD ZOOM IMAGEN */
-window.abrirZoom=function(src){var m=document.createElement('div');m.className='modal-backdrop';m.style.background='rgba(0,0,0,0.95)';m.style.cursor='zoom-out';m.style.zIndex='999';m.onclick=function(){m.remove()};m.innerHTML='<img src="'+src+'" style="max-width:90vw;max-height:90vh;object-fit:contain;box-shadow:0 0 50px rgba(0,0,0,0.5);border-radius:4px">';document.body.appendChild(m)};
-
 /* FUNCIONALIDAD TEMA (SOLO ICONO) */
 window.toggleTheme=function(){S.theme=S.theme==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',S.theme);localStorage.setItem('tetrace_theme',S.theme);var icon=document.getElementById('theme-icon');if(icon)icon.className='fa-solid '+(S.theme==='dark'?'fa-sun':'fa-moon')};
 
-/* FUNCIONALIDAD OCR (ESCANER) */
-window.escanearSerie=function(eid,event){var file=event.target.files[0];if(!file)return;event.target.value='';var btn=document.getElementById('scan-btn-'+eid);if(!btn)return;var originalHtml=btn.innerHTML;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Leyendo...';btn.disabled=true;toast('Procesando imagen...','info',2000);Tesseract.recognize(file,'eng',{logger:function(m){}}).then(function(result){var cleanedText=result.data.text.replace(/[^a-zA-Z0-9]/g,'').toUpperCase();var it=S.draft.items.find(function(i){return i.epiId===eid});if(it){it.numeroSerieDevuelto=cleanedText}ren();if(cleanedText){toast('Texto escaneado. Verifica que sea correcto.','success')}else{toast('No se detectó texto claro. Ingresalo manualmente.','error')}}).catch(function(err){toast('Error al procesar la imagen','error');ren()})};
+/* ALGORITMO DE SIMILITUD PARA IA */
+function getDistance(a, b) {
+    if(a.length === 0) return b.length; 
+    if(b.length === 0) return a.length;
+    var m = a.length, n = b.length;
+    var dp = Array(m + 1).fill(0).map(() => Array(n + 1).fill(0));
+    for(var i = 0; i <= m; i++) dp[i][0] = i;
+    for(var j = 0; j <= n; j++) dp[0][j] = j;
+    for(var i = 1; i <= m; i++) {
+        for(var j = 1; j <= n; j++) {
+            if(a[i-1] === b[j-1]) dp[i][j] = dp[i-1][j-1];
+            else dp[i][j] = 1 + Math.min(dp[i-1][j-1], dp[i][j-1], dp[i-1][j]);
+        }
+    }
+    return dp[m][n];
+}
+
+/* FUNCION PARA ROTAR IMAGEN (PARA LEER TEXTO VERTICAL) */
+function getRotatedImage(src, degrees) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const maxDim = 1000; 
+                let w = img.width;
+                let h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * (maxDim / w)); w = maxDim; }
+                    else { w = Math.round(w * (maxDim / h)); h = maxDim; }
+                }
+            if (degrees === 90 || degrees === 270) {
+                canvas.width = h;
+                canvas.height = w;
+            } else {
+                canvas.width = w;
+                canvas.height = h;
+            }
+            const ctx = canvas.getContext('2d');
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(degrees * Math.PI / 180);
+            ctx.drawImage(img, -w / 2, -h / 2, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.onerror = () => resolve(src);
+        img.src = src;
+    });
+}
+
+/* FUNCIONALIDAD OCR PARA AUDITAR UNA SOLA IMAGEN EN ZOOM (CON ROTACIÓN) */
+window.auditarZoomImg = async function(btn, imgEl, targetStr, resEl) {
+    var src = imgEl.src;
+    if(!src) return;
+    var target = targetStr || '';
+    if(!target) { toast('No hay serie asignada para auditar','error'); return; }
+    
+    var originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Inspeccionando...';
+    btn.disabled = true;
+    if(resEl) resEl.innerHTML = '<span class="text-[var(--muted)]"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Inspeccionando imagen...</span>';
+    
+    var found = false;
+    var detectedSnippets = [];
+    var rotations = [0, 90, 180, 270];
+
+    try {
+        for (var i = 0; i < rotations.length; i++) {
+            if (found) break;
+            var deg = rotations[i];
+            var imgToProcess = src;
+            if (deg !== 0) {
+                if(resEl) resEl.innerHTML = '<span class="text-[var(--muted)]"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Probando orientación '+deg+'°...</span>';
+                imgToProcess = await getRotatedImage(src, deg);
+            }
+
+            var result = await Tesseract.recognize(imgToProcess, 'eng', { logger: m => {} });
+            var rawText = (result.data.text || '').toUpperCase();
+            var cleanText = rawText.replace(/[^A-Z0-9]/g, '');
+
+            if (cleanText.length > 0) {
+                detectedSnippets.push(cleanText.substring(0, 40));
+            }
+
+            if (cleanText.length >= target.length) {
+                for (var j = 0; j <= cleanText.length - target.length; j++) {
+                    var sub = cleanText.substring(j, j + target.length);
+                    var dist = getDistance(sub, target);
+                    if (dist <= 2) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        
+        if (found) {
+            var msg = '¡Verificación exitosa! El serial ' + target + ' fue detectado en la foto.';
+            toast(msg, 'success', 6000);
+            if (resEl) resEl.innerHTML = '<span class="text-[var(--success)] font-bold"><i class="fa-solid fa-check-circle mr-2"></i>¡Serial detectado!</span>';
+        } else {
+            var snippet = detectedSnippets.length > 0 ? detectedSnippets[0] : 'Ninguno';
+            var msg = 'No se detectó el serial. Texto: "' + snippet + '..."';
+            toast(msg, 'error', 6000);
+            if (resEl) resEl.innerHTML = '<span class="text-[var(--danger)] font-bold"><i class="fa-solid fa-times-circle mr-2"></i>No detectado en esta foto</span>';
+        }
+    } catch (e) {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        toast('Error al procesar la imagen', 'error');
+        if (resEl) resEl.innerHTML = '<span class="text-[var(--danger)]">Error al procesar</span>';
+    }
+};
+
+/* VISOR DE IMAGEN CON MARCO, FLECHAS Y BOTON IA */
+window.abrirZoom = function(thumbEl, targetStr) {
+    var parentGrid = thumbEl.parentElement;
+    var imgs = Array.from(parentGrid.querySelectorAll('img')).map(i => i.src);
+    if(imgs.length === 0) return;
+    
+    var currentSrc = thumbEl.querySelector('img').src;
+    var currentIndex = imgs.indexOf(currentSrc);
+    if(currentIndex === -1) currentIndex = 0;
+    
+    var target = decodeURIComponent(targetStr || '').trim().toUpperCase();
+
+    var m = document.createElement('div');
+    m.className = 'modal-backdrop';
+    m.style.zIndex = '1500'; 
+    
+    m.addEventListener('click', function(e){
+        if(e.target === m) m.remove();
+    });
+    
+    var content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.maxWidth = '850px';
+    content.style.padding = '0';
+    content.style.overflow = 'hidden';
+    
+    // Header
+    var header = document.createElement('div');
+    header.className = 'p-4 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface-2)]';
+    var title = document.createElement('div');
+    title.className = 'font-mono text-xs tracking-[0.1em] text-[var(--muted)]';
+    title.id = 'zoom-title';
+    title.textContent = 'EVIDENCIA ' + (currentIndex + 1) + ' / ' + imgs.length;
+    
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'btn btn-ghost btn-xs';
+    closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> CERRAR';
+    closeBtn.onclick = function(){ m.remove(); };
+    
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    
+    // Body (Imagen)
+    var body = document.createElement('div');
+    body.className = 'p-6 flex items-center justify-center bg-[var(--bg)]';
+    body.style.minHeight = '300px';
+    body.style.maxHeight = '65vh';
+    
+    var imgEl = document.createElement('img');
+    imgEl.id = 'zoom-img';
+    imgEl.src = imgs[currentIndex];
+    imgEl.style.maxWidth = '100%';
+    imgEl.style.maxHeight = '65vh';
+    imgEl.style.objectFit = 'contain';
+    imgEl.style.borderRadius = '4px';
+    imgEl.style.boxShadow = '0 10px 30px rgba(0,0,0,0.3)';
+    body.appendChild(imgEl);
+    
+    // Resultado IA
+    var resEl = document.createElement('div');
+    resEl.className = 'py-3 text-center font-mono text-sm border-t border-[var(--border)]';
+    resEl.id = 'zoom-result';
+    resEl.innerHTML = '<span class="text-[var(--muted)]">Presiona ✨IA para inspeccionar foto</span>';
+    
+    // Footer (Botones)
+    var footer = document.createElement('div');
+    footer.className = 'p-4 border-t border-[var(--border)] flex items-center justify-between gap-4 bg-[var(--surface-2)]';
+    
+    var prevBtn = document.createElement('button');
+    prevBtn.className = 'btn btn-ghost btn-sm';
+    prevBtn.innerHTML = '<i class="fa-solid fa-arrow-left"></i> ANTERIOR';
+    prevBtn.onclick = function(){
+        currentIndex = (currentIndex - 1 + imgs.length) % imgs.length;
+        imgEl.src = imgs[currentIndex];
+        title.textContent = 'EVIDENCIA ' + (currentIndex + 1) + ' / ' + imgs.length;
+        resEl.innerHTML = '<span class="text-[var(--muted)]">Presiona ✨IA para inspeccionar foto</span>';
+    };
+    
+    var aiBtn = document.createElement('button');
+    aiBtn.className = 'btn btn-primary btn-sm';
+    aiBtn.innerHTML = '✨ IA';
+    aiBtn.onclick = function(){
+        auditarZoomImg(this, imgEl, target, resEl);
+    };
+    
+    var nextBtn = document.createElement('button');
+    nextBtn.className = 'btn btn-ghost btn-sm';
+    nextBtn.innerHTML = 'SIGUIENTE <i class="fa-solid fa-arrow-right"></i>';
+    nextBtn.onclick = function(){
+        currentIndex = (currentIndex + 1) % imgs.length;
+        imgEl.src = imgs[currentIndex];
+        title.textContent = 'EVIDENCIA ' + (currentIndex + 1) + ' / ' + imgs.length;
+        resEl.innerHTML = '<span class="text-[var(--muted)]">Presiona ✨IA para inspeccionar foto</span>';
+    };
+    
+    footer.appendChild(prevBtn);
+    footer.appendChild(aiBtn);
+    footer.appendChild(nextBtn);
+    
+    content.appendChild(header);
+    content.appendChild(body);
+    content.appendChild(resEl);
+    content.appendChild(footer);
+    m.appendChild(content);
+    document.body.appendChild(m);
+};
 
 function ren(){
 var r=document.getElementById('root');
-r.innerHTML='<div class="bg-grid"></div><div class="bg-glow"></div><div class="bg-noise"></div><div class="scanline"></div>'+rHdr()+'<main id="app" class="relative z-10"></main><div id="toasts" class="fixed bottom-6 right-6 z-[200] flex flex-col gap-2"></div><div id="modal-root"></div>';
+r.innerHTML='<div class="bg-grid"></div><div class="bg-glow"></div><div class="bg-noise"></div><div class="scanline"></div>'+rHdr()+'<main id="app" class="relative z-10"></main><div id="modal-root"></div>';
 var a=document.getElementById('app');var h='';
 if(S.currentView==='landing')h=rLan();else if(S.currentView==='tecnico')h=rTec();else if(S.currentView==='login')h=rLog();else if(S.currentView==='supervisor')h=rSup();
 a.innerHTML='<div class="view-enter">'+h+'</div>';afR()}
@@ -246,7 +465,7 @@ window.selTec=function(id){var t=gTB(id);if(!t)return;var pe=gES(id).filter(func
 
 function rTec(){var t=gTB(S.selectedTecnicoId);if(!t||!S.draft){setV('landing');return''}var d=S.draft;var ti=d.items.length;var co=d.items.filter(function(i){return i.devuelto?i.estado>0:true}).length;var im=d.items.reduce(function(s,i){return s+i.imagenes.length},0);return'<section class="max-w-[1100px] mx-auto px-6 py-12"><div class="flex items-center gap-3 mb-6"><button onclick="setV(\'landing\')" class="text-[var(--muted)] hover:text-[var(--accent)] transition font-mono text-xs"><i class="fa-solid fa-arrow-left mr-2"></i>VOLVER</button><div class="flex-1 h-px bg-[var(--border)]"></div></div><h1 class="font-display font-black text-5xl md:text-6xl tracking-tight mb-3">Formulario de Devoluci\u00f3n</h1><p class="text-[var(--fg-dim)] mb-12 max-w-2xl">Campos <span class="text-[var(--accent)] font-mono">[REQ]</span> son obligatorios.</p><form id="dev-form" onsubmit="return false"><div class="mb-16"><div class="section-header"><span class="section-number">SEC / 01</span><h2 class="section-title">Datos Generales</h2><div class="section-line"></div></div><div class="grid md:grid-cols-2 gap-5"><div><label class="field-label">Nombre</label><input type="text" class="field-input" value="'+esc(t.nombreCompleto)+'" readonly></div><div><label class="field-label">Proyecto</label><input type="text" class="field-input mono" value="'+esc(t.codigoProyecto)+'" readonly></div></div></div><div class="mb-12"><div class="section-header"><span class="section-number">SEC / 02</span><h2 class="section-title">EPP Asignados</h2><div class="section-line"></div><span class="font-mono text-[10px] text-[var(--muted)]" id="pt">'+ti+' \u00b7 '+co+' completos \u00b7 '+im+' imgs</span></div><div class="space-y-5">'+d.items.map(rEFI).join('')+'</div><div class="mt-6 p-4 bg-[var(--surface)] border border-[var(--border)] rounded flex items-center gap-4"><div class="flex-1"><div class="comparison-bar" style="height:8px" id="pb"><div class="seg-devuelto" style="width:'+(co/ti*100)+'%"></div></div></div><div class="font-mono text-sm font-bold" id="pc">'+co+'/'+ti+'</div></div></div><div class="flex flex-wrap items-center justify-between gap-4 pt-8 border-t border-[var(--border)]"><button type="button" id="cancel-btn" class="btn btn-ghost"><i class="fa-solid fa-xmark"></i> Cancelar</button><button type="button" id="submit-btn" class="btn btn-primary"><i class="fa-solid fa-paper-plane"></i> Enviar</button></div></form></section>'}
 
-function rEFI(it,idx){var n=String(idx+1).padStart(2,'0');var sd=it.numeroSerieDevuelto.trim()!==''&&it.numeroSerieDevuelto.trim().toLowerCase()!==it.numeroSerieAsignado.trim().toLowerCase();var serieStatusHtml='';var serieInputClass='';if(it.numeroSerieDevuelto.trim()!==''){if(sd){serieStatusHtml='<span class="badge badge-danger flex items-center gap-1"><i class="fa-solid fa-xmark"></i> No Coincide</span>';serieInputClass='text-[var(--danger)]'}else{serieStatusHtml='<span class="badge badge-revisado flex items-center gap-1"><i class="fa-solid fa-check"></i> Coincide</span>';serieInputClass='text-[var(--success)]'}}var estColor=it.estado?(EL[it.estado].color==='danger'?'var(--danger)':EL[it.estado].color==='warning'?'var(--warning)':'var(--success)'):'var(--muted)';var estHtml=it.estado?'<span style="width:10px;height:10px;background:'+estColor+';border-radius:2px;display:inline-block;"></span> '+it.estado+'/5 '+EL[it.estado].label:'SIN CALIFICAR';return'<div class="epp-card '+(it.devuelto?'returned':'missing')+'"><div class="epp-card-header"><div class="flex items-center gap-3"><span class="epp-card-tag">EPP / '+n+'</span><i class="fa-solid '+gPI(it.producto)+' text-[var(--accent)]"></i><span class="font-bold text-sm">'+esc(it.producto)+'</span></div><div class="devuelto-toggle" data-epi-id="'+it.epiId+'"><button class="'+(it.devuelto?'active devuelto':'')+'" data-val="true">Devuelto</button><button class="'+(!it.devuelto?'active no-devuelto':'')+'" data-val="false">No devuelto</button></div></div><div class="p-6"><div class="mb-6"><label class="field-label">Serie Asignada</label><input type="text" class="field-input mono" value="'+esc(it.numeroSerieAsignado)+'" readonly></div>'+(it.devuelto?'<div class="mb-6"><div class="flex items-center justify-between mb-2"><label class="field-label" style="margin-bottom:0">Serie Devuelta</label><div class="flex items-center gap-2"><button type="button" id="scan-btn-'+it.epiId+'" class="btn btn-ghost btn-xs" onclick="document.getElementById(\'scan-input-'+it.epiId+'\').click()"><i class="fa-solid fa-camera"></i> Escanear</button><input type="file" accept="image/*" capture="environment" class="hidden" id="scan-input-'+it.epiId+'" onchange="escanearSerie(\''+it.epiId+'\',event)">'+serieStatusHtml+'</div></div><input type="text" class="field-input mono '+serieInputClass+'" value="'+esc(it.numeroSerieDevuelto)+'" oninput="sS(\''+it.epiId+'\',this.value)" onblur="cSD()" onkeydown="if(event.key===\'Enter\')this.blur()" placeholder="Ingrese serie devuelta o escanee"></div>'+(sd?'<div class="mb-6 p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded" style="animation:slideIn 0.3s ease"><label class="field-label text-[var(--danger)]">Motivo diferencia <span class="req">[REQ]</span></label><textarea class="field-input" rows="2" oninput="uM(\''+it.epiId+'\',this.value)" placeholder="Explique por qu\u00e9 no coincide...">'+esc(it.motivoDiferencia)+'</textarea></div>':'')+'<div class="mb-6"><label class="field-label">Condici\u00f3n <span class="req">[REQ]</span></label><div class="condition-selector" data-epi-id="'+it.epiId+'">'+[1,2,3,4,5].map(function(n){return'<div class="condition-bar '+(it.estado>=n?'active '+EL[n].color:'')+'" data-rate="'+n+'">'+n+'</div>'}).join('')+'</div><div class="flex justify-between mt-2 font-mono text-[10px] text-[var(--muted)]"><span>CR\u00cdTICO</span><span class="estado-label flex items-center gap-1.5" data-epi-id="'+it.epiId+'" style="color:'+estColor+'">'+estHtml+'</span><span>EXCELENTE</span></div></div><div><label class="field-label">Evidencia <span class="text-[var(--muted)]">[M\u00c1N 5]</span></label><div id="ic-'+it.epiId+'">'+(it.imagenes.length>0?'<div class="grid grid-cols-4 sm:grid-cols-5 gap-2 mb-3">'+it.imagenes.map(function(img,i){return'<div class="image-thumb" style="cursor:zoom-in" onclick="abrirZoom(\''+img+'\')"><img src="'+img+'"><button type="button" class="remove-btn" onclick="event.stopPropagation();rI(\''+it.epiId+'\','+i+')"><i class="fa-solid fa-xmark"></i></button></div>'}).join('')+'</div>':'')+(it.imagenes.length<5?'<div class="image-drop" onclick="tU(\''+it.epiId+'\')" ondragover="event.preventDefault();this.classList.add(\'dragover\')" ondragleave="this.classList.remove(\'dragover\')" ondrop="hD(event,\''+it.epiId+'\')"><i class="fa-solid fa-cloud-arrow-up text-[var(--accent)] text-2xl mb-2"></i><div class="text-sm">Arrastre o clic</div><input type="file" accept="image/*" multiple class="hidden" id="fi-'+it.epiId+'" onchange="hFS(event,\''+it.epiId+'\')"></div>':'')+'</div></div>':'<div class="p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation text-[var(--danger)]"></i><div><div class="font-bold text-sm text-[var(--danger)]">No devuelto</div><div class="text-xs text-[var(--muted)]">Se marcar\u00e1 como faltante</div></div></div>')+'</div></div>'}
+function rEFI(it,idx){var n=String(idx+1).padStart(2,'0');var sd=it.numeroSerieDevuelto.trim()!==''&&it.numeroSerieDevuelto.trim().toLowerCase()!==it.numeroSerieAsignado.trim().toLowerCase();var serieStatusHtml='';var serieInputClass='';if(it.numeroSerieDevuelto.trim()!==''){if(sd){serieStatusHtml='<span class="badge badge-danger flex items-center gap-1"><i class="fa-solid fa-xmark"></i> No Coincide</span>';serieInputClass='text-[var(--danger)]'}else{serieStatusHtml='<span class="badge badge-revisado flex items-center gap-1"><i class="fa-solid fa-check"></i> Coincide</span>';serieInputClass='text-[var(--success)]'}}var estColor=it.estado?(EL[it.estado].color==='danger'?'var(--danger)':EL[it.estado].color==='warning'?'var(--warning)':'var(--success)'):'var(--muted)';var estHtml=it.estado?'<span style="width:10px;height:10px;background:'+estColor+';border-radius:2px;display:inline-block;"></span> '+it.estado+'/5 '+EL[it.estado].label:'SIN CALIFICAR';return'<div class="epp-card '+(it.devuelto?'returned':'missing')+'"><div class="epp-card-header"><div class="flex items-center gap-3"><span class="epp-card-tag">EPP / '+n+'</span><i class="fa-solid '+gPI(it.producto)+' text-[var(--accent)]"></i><span class="font-bold text-sm">'+esc(it.producto)+'</span></div><div class="devuelto-toggle" data-epi-id="'+it.epiId+'"><button class="'+(it.devuelto?'active devuelto':'')+'" data-val="true">Devuelto</button><button class="'+(!it.devuelto?'active no-devuelto':'')+'" data-val="false">No devuelto</button></div></div><div class="p-6"><div class="mb-6"><label class="field-label">Serie Asignada</label><input type="text" class="field-input mono" value="'+esc(it.numeroSerieAsignado)+'" readonly></div>'+(it.devuelto?'<div class="mb-6"><div class="flex items-center justify-between mb-2"><label class="field-label" style="margin-bottom:0">Serie Devuelta</label><div class="flex items-center gap-2">'+serieStatusHtml+'</div></div><input type="text" class="field-input mono '+serieInputClass+'" value="'+esc(it.numeroSerieDevuelto)+'" oninput="sS(\''+it.epiId+'\',this.value)" onblur="cSD()" onkeydown="if(event.key===\'Enter\')this.blur()" placeholder="Ingrese serie devuelta"></div>'+(sd?'<div class="mb-6 p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded" style="animation:slideIn 0.3s ease"><label class="field-label text-[var(--danger)]">Motivo diferencia <span class="req">[REQ]</span></label><textarea class="field-input" rows="2" oninput="uM(\''+it.epiId+'\',this.value)" placeholder="Explique por qu\u00e9 no coincide...">'+esc(it.motivoDiferencia)+'</textarea></div>':'')+'<div class="mb-6"><label class="field-label">Condici\u00f3n <span class="req">[REQ]</span></label><div class="condition-selector" data-epi-id="'+it.epiId+'">'+[1,2,3,4,5].map(function(n){return'<div class="condition-bar '+(it.estado>=n?'active '+EL[n].color:'')+'" data-rate="'+n+'">'+n+'</div>'}).join('')+'</div><div class="flex justify-between mt-2 font-mono text-[10px] text-[var(--muted)]"><span>CR\u00cdTICO</span><span class="estado-label flex items-center gap-1.5" data-epi-id="'+it.epiId+'" style="color:'+estColor+'">'+estHtml+'</span><span>EXCELENTE</span></div></div><div><label class="field-label">Evidencia <span class="text-[var(--muted)]">[M\u00c1N 5]</span></label><div id="ic-'+it.epiId+'">'+(it.imagenes.length>0?'<div class="grid grid-cols-4 sm:grid-cols-5 gap-2 mb-3">'+it.imagenes.map(function(img,i){return'<div class="image-thumb" style="cursor:zoom-in" onclick="abrirZoom(this)"><img src="'+img+'"><button type="button" class="remove-btn" onclick="event.stopPropagation();rI(\''+it.epiId+'\','+i+')"><i class="fa-solid fa-xmark"></i></button></div>'}).join('')+'</div>':'')+(it.imagenes.length<5?'<div class="image-drop" onclick="tU(\''+it.epiId+'\')" ondragover="event.preventDefault();this.classList.add(\'dragover\')" ondragleave="this.classList.remove(\'dragover\')" ondrop="hD(event,\''+it.epiId+'\')"><i class="fa-solid fa-cloud-arrow-up text-[var(--accent)] text-2xl mb-2"></i><div class="text-sm">Arrastre o clic</div><input type="file" accept="image/*" multiple class="hidden" id="fi-'+it.epiId+'" onchange="hFS(event,\''+it.epiId+'\')"></div>':'')+'</div></div>':'<div class="p-4 bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.2)] rounded flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation text-[var(--danger)]"></i><div><div class="font-bold text-sm text-[var(--danger)]">No devuelto</div><div class="text-xs text-[var(--muted)]">Se marcar\u00e1 como faltante</div></div></div>')+'</div></div>'}
 
 function bTec(){document.getElementById('cancel-btn').addEventListener('click',function(){S.draft=null;S.selectedTecnicoId=null;setV('landing')});document.getElementById('submit-btn').addEventListener('click',subDev);document.querySelectorAll('.devuelto-toggle').forEach(function(tg){tg.querySelectorAll('button').forEach(function(bn){bn.addEventListener('click',function(){var eid=tg.dataset.epiId;var v=bn.dataset.val==='true';var it=S.draft.items.find(function(i){return i.epiId===eid});if(!it)return;it.devuelto=v;if(!v){it.estado=0;it.imagenes=[];it.motivoDiferencia=''}ren()})})});document.querySelectorAll('.condition-selector').forEach(function(sel){sel.querySelectorAll('.condition-bar').forEach(function(bar){bar.addEventListener('click',function(){sE(sel.dataset.epiId,parseInt(bar.dataset.rate))})})})}
 
@@ -272,7 +491,7 @@ function rTD(){var f=S.devoluciones.slice().reverse();if(S.filter.estado==='all'
 function rSR(d){var dv=d.items.filter(function(i){return i.devuelto}).length;var fa=d.items.length-dv;var bc=d.estado==='pendiente'?'badge-pendiente':d.estado==='revisado'?'badge-revisado':'badge-archivado';return'<div class="submission-row" onclick="vDD(\''+d.id+'\')"><span class="font-mono text-xs font-bold text-[var(--accent)]">'+d.id+'</span><div><div class="font-bold text-sm">'+esc(d.tecnico.nombreCompleto)+'</div><div class="font-mono text-[10px] text-[var(--muted)]">'+esc(d.tecnico.codigoProyecto)+'</div></div><div><div class="text-sm">'+fF(d.timestamp)+'</div><div class="font-mono text-[10px] text-[var(--muted)]">'+fH(d.timestamp)+'</div></div><span class="badge '+bc+'">'+d.estado+'</span><div class="font-mono text-xs"><span class="text-[var(--success)]">'+dv+'</span>'+(fa>0?' <span class="text-[var(--muted)]">/</span> <span class="text-[var(--danger)]">'+fa+'</span>':'')+'</div><i class="fa-solid fa-chevron-right text-[var(--muted)] text-xs"></i></div>'}
 window.sFE=function(e){S.filter.estado=e;ren()};window.sFS=function(v){S.filter.search=v;ren()};
 
-window.vDD=function(did){var d=S.devoluciones.find(function(x){return x.id===did});if(!d)return;var bc=d.estado==='pendiente'?'badge-pendiente':d.estado==='revisado'?'badge-revisado':'badge-archivado';var btns='';if(d.estado==='pendiente')btns='<button class="btn btn-success-outline btn-sm" onclick="cED(\''+d.id+'\',\'revisado\')"><i class="fa-solid fa-check"></i> REVISADO</button><button class="btn btn-danger btn-sm" onclick="eLD(\''+d.id+'\')"><i class="fa-solid fa-trash"></i> ELIMINAR</button>';else if(d.estado==='revisado')btns='<button class="btn btn-ghost btn-sm" onclick="cED(\''+d.id+'\',\'archivado\')"><i class="fa-solid fa-box-archive"></i> ARCHIVAR</button><button class="btn btn-danger btn-sm" onclick="eLD(\''+d.id+'\')"><i class="fa-solid fa-trash"></i> ELIMINAR</button>';else btns='<button class="btn btn-ghost btn-sm" onclick="cED(\''+d.id+'\',\'pendiente\')"><i class="fa-solid fa-rotate-left"></i> REABRIR</button>';clM();document.getElementById('modal-root').innerHTML='<div class="modal-backdrop" onclick="if(event.target===this)clM()"><div class="modal-content" style="max-width:800px"><div class="p-6 border-b border-[var(--border)] flex items-center justify-between"><div class="flex items-center gap-4"><span class="font-mono text-sm font-bold text-[var(--accent)]">'+d.id+'</span><span class="badge '+bc+'">'+d.estado+'</span></div><button onclick="clM()" class="text-[var(--muted)] hover:text-[var(--fg)] text-xl"><i class="fa-solid fa-xmark"></i></button></div><div class="p-6"><div class="detail-grid mb-8"><span class="dl">T\u00e9cnico</span><span class="dv font-bold">'+esc(d.tecnico.nombreCompleto)+'</span><span class="dl">Proyecto</span><span class="dv font-mono">'+esc(d.tecnico.codigoProyecto)+'</span><span class="dl">Fecha</span><span class="dv">'+fF(d.timestamp)+' \u00b7 '+fH(d.timestamp)+'</span><span class="dl">Hace</span><span class="dv text-[var(--muted)]">'+tA(d.timestamp)+'</span></div><div class="font-mono text-[10px] text-[var(--muted)] mb-4">EQUIPOS</div><div class="space-y-3">'+d.items.map(function(it){var cn=it.devuelto&&it.estado?EL[it.estado]:null;var cc=cn?(cn.color==='danger'?'var(--danger)':cn.color==='warning'?'var(--warning)':'var(--success)'):'var(--muted)';var estadoPillHtml=cn?'<span class="cond-pill flex items-center gap-1.5" style="background:'+cc+'22;color:'+cc+'"><span style="width:10px;height:10px;background:'+cc+';border-radius:2px;display:inline-block;"></span> '+it.estado+'/5 '+cn.label+'</span>':'';var sdSup=it.devuelto&&it.numeroSerieDevuelto.trim()!==''&&it.numeroSerieDevuelto.trim().toLowerCase()!==it.numeroSerieAsignado.trim().toLowerCase();var matchSup=it.devuelto&&it.numeroSerieDevuelto.trim()!==''&&!sdSup;var serieSupHtml='';if(it.devuelto&&it.numeroSerieDevuelto.trim()!==''){if(sdSup){serieSupHtml=' <span class="badge badge-danger flex items-center gap-1 ml-1"><i class="fa-solid fa-xmark"></i> No Coincide</span>'}else{serieSupHtml=' <span class="badge badge-revisado flex items-center gap-1 ml-1"><i class="fa-solid fa-check"></i> Coincide</span>'}}return'<div class="p-4 rounded border border-[var(--border)] '+(it.devuelto?'bg-[var(--surface-2)]':'bg-[rgba(239,68,68,0.04)]')+'"><div class="flex items-center justify-between mb-2"><div class="flex items-center gap-2"><i class="fa-solid '+gPI(it.producto)+' text-[var(--accent)] text-sm"></i><span class="font-bold text-sm">'+esc(it.producto)+'</span>'+(!it.devuelto?'<span class="badge badge-danger text-[9px]">FALTANTE</span>':'')+'</div>'+estadoPillHtml+'</div><div class="grid grid-cols-2 gap-2 font-mono text-[11px]"><div><span class="text-[var(--muted)]">Asignada:</span> '+esc(it.numeroSerieAsignado)+'</div><div><span class="text-[var(--muted)]">Devuelta:</span> <span class="'+(sdSup?'text-[var(--danger)]':matchSup?'text-[var(--success)]':'')+'">'+(it.devuelto?esc(it.numeroSerieDevuelto):'\u2014')+'</span>'+serieSupHtml+'</div></div>'+(it.motivoDiferencia?'<div class="mt-2 text-xs text-[var(--warning)]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>'+esc(it.motivoDiferencia)+'</div>':'')+(it.imagenes.length>0?'<div class="grid grid-cols-5 gap-1 mt-3">'+it.imagenes.map(function(img){return'<div class="aspect-square rounded overflow-hidden border border-[var(--border)] cursor-zoom-in" onclick="abrirZoom(\''+img+'\')"><img src="'+img+'" class="w-full h-full object-cover"></div>'}).join('')+'</div>':'')+'</div>'}).join('')+'</div><div class="flex flex-wrap gap-3 mt-8 pt-6 border-t border-[var(--border)]">'+btns+'</div></div></div></div>'};
+window.vDD=function(did){var d=S.devoluciones.find(function(x){return x.id===did});if(!d)return;var bc=d.estado==='pendiente'?'badge-pendiente':d.estado==='revisado'?'badge-revisado':'badge-archivado';var btns='';if(d.estado==='pendiente')btns='<button class="btn btn-success-outline btn-sm" onclick="cED(\''+d.id+'\',\'revisado\')"><i class="fa-solid fa-check"></i> REVISADO</button><button class="btn btn-danger btn-sm" onclick="eLD(\''+d.id+'\')"><i class="fa-solid fa-trash"></i> ELIMINAR</button>';else if(d.estado==='revisado')btns='<button class="btn btn-ghost btn-sm" onclick="cED(\''+d.id+'\',\'archivado\')"><i class="fa-solid fa-box-archive"></i> ARCHIVAR</button><button class="btn btn-danger btn-sm" onclick="eLD(\''+d.id+'\')"><i class="fa-solid fa-trash"></i> ELIMINAR</button>';else btns='<button class="btn btn-ghost btn-sm" onclick="cED(\''+d.id+'\',\'pendiente\')"><i class="fa-solid fa-rotate-left"></i> REABRIR</button>';clM();document.getElementById('modal-root').innerHTML='<div class="modal-backdrop" onclick="if(event.target===this)clM()"><div class="modal-content" style="max-width:800px"><div class="p-6 border-b border-[var(--border)] flex items-center justify-between"><div class="flex items-center gap-4"><span class="font-mono text-sm font-bold text-[var(--accent)]">'+d.id+'</span><span class="badge '+bc+'">'+d.estado+'</span></div><button onclick="clM()" class="text-[var(--muted)] hover:text-[var(--fg)] text-xl"><i class="fa-solid fa-xmark"></i></button></div><div class="p-6"><div class="detail-grid mb-8"><span class="dl">T\u00e9cnico</span><span class="dv font-bold">'+esc(d.tecnico.nombreCompleto)+'</span><span class="dl">Proyecto</span><span class="dv font-mono">'+esc(d.tecnico.codigoProyecto)+'</span><span class="dl">Fecha</span><span class="dv">'+fF(d.timestamp)+' \u00b7 '+fH(d.timestamp)+'</span><span class="dl">Hace</span><span class="dv text-[var(--muted)]">'+tA(d.timestamp)+'</span></div><div class="font-mono text-[10px] text-[var(--muted)] mb-4">EQUIPOS</div><div class="space-y-3">'+d.items.map(function(it){var cn=it.devuelto&&it.estado?EL[it.estado]:null;var cc=cn?(cn.color==='danger'?'var(--danger)':cn.color==='warning'?'var(--warning)':'var(--success)'):'var(--muted)';var estadoPillHtml=cn?'<span class="cond-pill flex items-center gap-1.5" style="background:'+cc+'22;color:'+cc+'"><span style="width:10px;height:10px;background:'+cc+';border-radius:2px;display:inline-block;"></span> '+it.estado+'/5 '+cn.label+'</span>':'';var sdSup=it.devuelto&&it.numeroSerieDevuelto.trim()!==''&&it.numeroSerieDevuelto.trim().toLowerCase()!==it.numeroSerieAsignado.trim().toLowerCase();var matchSup=it.devuelto&&it.numeroSerieDevuelto.trim()!==''&&!sdSup;var serieSupHtml='';if(it.devuelto&&it.numeroSerieDevuelto.trim()!==''){if(sdSup){serieSupHtml=' <span class="badge badge-danger flex items-center gap-1 ml-1"><i class="fa-solid fa-xmark"></i> No Coincide</span>'}else{serieSupHtml=' <span class="badge badge-revisado flex items-center gap-1 ml-1"><i class="fa-solid fa-check"></i> Coincide</span>'}}var safeTarget=encodeURIComponent(it.numeroSerieAsignado||'');return'<div class="p-4 rounded border border-[var(--border)] '+(it.devuelto?'bg-[var(--surface-2)]':'bg-[rgba(239,68,68,0.04)]')+'"><div class="flex items-center justify-between mb-2"><div class="flex items-center gap-2"><i class="fa-solid '+gPI(it.producto)+' text-[var(--accent)] text-sm"></i><span class="font-bold text-sm">'+esc(it.producto)+'</span>'+(!it.devuelto?'<span class="badge badge-danger text-[9px]">FALTANTE</span>':'')+'</div>'+estadoPillHtml+'</div><div class="grid grid-cols-2 gap-2 font-mono text-[11px]"><div><span class="text-[var(--muted)]">Asignada:</span> '+esc(it.numeroSerieAsignado)+'</div><div><span class="text-[var(--muted)]">Devuelta:</span> <span class="'+(sdSup?'text-[var(--danger)]':matchSup?'text-[var(--success)]':'')+'">'+(it.devuelto?esc(it.numeroSerieDevuelto):'\u2014')+'</span>'+serieSupHtml+'</div></div>'+(it.motivoDiferencia?'<div class="mt-2 text-xs text-[var(--warning)]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>'+esc(it.motivoDiferencia)+'</div>':'')+(it.imagenes.length>0?'<div class="mt-3" id="audit-container-'+it.epiId+'"><div class="flex items-center justify-between mb-2"><span class="font-mono text-[10px] text-[var(--muted)]">FOTOS ADJUNTAS</span></div><div class="grid grid-cols-5 gap-1">'+it.imagenes.map(function(img){return'<div class="aspect-square rounded overflow-hidden border border-[var(--border)] cursor-zoom-in" onclick="abrirZoom(this, \''+safeTarget+'\')"><img src="'+img+'" class="w-full h-full object-cover"></div>'}).join('')+'</div></div>':'')+'</div>'}).join('')+'</div><div class="flex flex-wrap gap-3 mt-8 pt-6 border-t border-[var(--border)]">'+btns+'</div></div></div></div>'};
 window.cED=function(did,ns){var d=S.devoluciones.find(function(x){return x.id===did});if(d){d.estado=ns;save();clM();ren();toast(did+' \u2192 '+ns,'success')}};
 window.eLD=function(did){S.devoluciones=S.devoluciones.filter(function(x){return x.id!==did});save();clM();ren();toast(did+' eliminada','info')};
 window.expXLS=function(){if(!S.devoluciones.length){toast('Sin datos','error');return}var rows=[];S.devoluciones.forEach(function(d){d.items.forEach(function(it){rows.push({'ID':d.id,'T\u00e9cnico':d.tecnico.nombreCompleto,'Proyecto':d.tecnico.codigoProyecto,'Fecha':fF(d.timestamp),'Producto':it.producto,'Serie Asignada':it.numeroSerieAsignado,'Serie Devuelta':it.devuelto?it.numeroSerieDevuelto:'NO DEVUELTO','Estado':it.devuelto?(EL[it.estado]?EL[it.estado].label:'N/A'):'FALTANTE','Motivo':it.motivoDiferencia||'','Estado Dev':d.estado})})});var ws=XLSX.utils.json_to_sheet(rows);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Devoluciones');XLSX.writeFile(wb,'Devoluciones_TETRACE_'+new Date().toISOString().slice(0,10)+'.xlsx');toast('Excel descargado','success')};
@@ -287,7 +506,7 @@ window.aEpp=function(){var a=S.asignacion;if(!a.editingTecnicoId)return;var p=a.
 window.eEpp=function(tid,eid){var t=gTB(tid);if(!t)return;t.epis=t.epis.filter(function(e){return e.id!==eid});save();ren();toast('EPP eliminado','info')};
 window.hIX=function(file){if(!file)return;var r=new FileReader();r.onload=function(e){try{var wb=XLSX.read(e.target.result,{type:'array'});var ws=wb.Sheets[wb.SheetNames[0]];var data=XLSX.utils.sheet_to_json(ws,{header:1});if(data.length<2){toast('Vac\u00edo','error');return}var ag=0;var tm={};for(var i=1;i<data.length;i++){var row=data[i];if(!row||!row[0])continue;var n=String(row[0]||'').trim();var p=String(row[1]||'').trim();var pr=String(row[2]||'').trim();var s=String(row[3]||'').trim();if(!n||!pr)continue;var k=n+'|||'+p;if(!tm[k])tm[k]={nombre:n,proyecto:p,epis:[]};tm[k].epis.push({id:uid('E'),producto:pr,numeroSerie:s||'Sin serie'})}for(var k in tm){var d=tm[k];var t=S.tecnicos.find(function(x){return x.nombreCompleto.toLowerCase()===d.nombre.toLowerCase()&&x.codigoProyecto.toLowerCase()===d.proyecto.toLowerCase()});if(!t){t={id:gTI(),nombreCompleto:d.nombre,codigoProyecto:d.proyecto,epis:[],createdAt:Date.now()};S.tecnicos.push(t)}t.epis.push.apply(t.epis,d.epis);ag+=d.epis.length}save();ren();toast(ag+' EPP importados','success')}catch(err){toast('Error Excel','error')}};r.readAsArrayBuffer(file)};
 
-/* TAB REASIGNACIÓN  */
+/* TAB REASIGNACIÓN */
 function rTR(){var r=S.reasignacion;var to=r.tecnicoOrigenId?gTB(r.tecnicoOrigenId):null;var eo=to?to.epis:[];var as=eo.length>0&&r.selectedEppIds.length===eo.length;var td=r.tecnicoDestinoId?gTB(r.tecnicoDestinoId):null;return'<div class="grid lg:grid-cols-2 gap-8"><div><div class="section-header"><span class="section-number">01</span><h3 class="section-title" style="font-size:22px">Origen</h3><div class="section-line"></div></div><select class="field-input" onchange="sTO(this.value)"><option value="">-- Seleccione --</option>'+S.tecnicos.map(function(t){return'<option value="'+t.id+'" '+(r.tecnicoOrigenId===t.id?'selected':'')+'>'+esc(t.nombreCompleto)+'</option>'}).join('')+'</select>'+(eo.length>0?'<div class="mt-5 bg-[var(--surface)] border border-[var(--border)] rounded overflow-hidden"><label class="flex items-center gap-3 cursor-pointer p-4 border-b border-[var(--border)] bg-[var(--surface-2)]"><input type="checkbox" id="cb-sa" class="epp-checkbox" '+(as?'checked':'')+' onchange="tAE(this.checked)"><span class="font-mono text-xs font-bold text-[var(--accent)]">SELECCIONAR TODOS ('+eo.length+')</span></label><div class="divide-y divide-[var(--border)]">'+eo.map(function(e){var is=r.selectedEppIds.includes(e.id);return'<label class="reassign-epp-item '+(is?'selected':'')+'" onclick="tEL(event,\''+e.id+'\')"><input type="checkbox" class="epp-checkbox" '+(is?'checked':'')+' onchange="tE(\''+e.id+'\',this.checked)" onclick="event.stopPropagation()"><i class="fa-solid '+gPI(e.producto)+' text-[var(--accent)] text-sm w-5 text-center"></i><div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">'+esc(e.producto)+'</div><div class="font-mono text-[10px] text-[var(--muted)] truncate">'+esc(e.numeroSerie)+'</div></div>'+(is?'<i class="fa-solid fa-circle-check text-[var(--accent)] text-sm"></i>':'')+'</label>'}).join('')+'</div></div><div class="mt-3 flex items-center gap-3"><div class="comparison-bar flex-1" style="height:4px"><div class="seg-devuelto" style="width:'+(eo.length>0?(r.selectedEppIds.length/eo.length*100):0)+'%"></div></div><span class="font-mono text-[10px] text-[var(--muted)]">'+r.selectedEppIds.length+'/'+eo.length+'</span></div>':r.tecnicoOrigenId?'<div class="mt-5 text-center py-10 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-box-open text-3xl text-[var(--muted)] mb-3"></i><div class="text-sm text-[var(--muted)]">Sin EPPs</div></div>':'<div class="mt-5 text-center py-10 border border-dashed border-[var(--border)] rounded"><i class="fa-solid fa-arrow-up-from-bracket text-3xl text-[var(--muted)] mb-3"></i><div class="text-sm text-[var(--muted)]">Seleccione t\u00e9cnico</div></div>')+'</div><div><div class="section-header"><span class="section-number">02</span><h3 class="section-title" style="font-size:22px">Destino</h3><div class="section-line"></div></div><select class="field-input" onchange="sTD(this.value)" '+(r.tecnicoOrigenId?'':'disabled')+'><option value="">-- Seleccione destino --</option>'+S.tecnicos.filter(function(t){return t.id!==r.tecnicoOrigenId}).map(function(t){return'<option value="'+t.id+'" '+(r.tecnicoDestinoId===t.id?'selected':'')+'>'+esc(t.nombreCompleto)+'</option>'}).join('')+'</select>'+(td?'<div class="mt-5 bg-[var(--surface)] border border-[var(--border)] rounded p-4"><div class="font-mono text-[10px] text-[var(--muted)] mb-3">EPPS ACTUALES</div>'+(td.epis.length>0?'<div class="space-y-2">'+td.epis.map(function(e){return'<div class="flex items-center gap-2 py-1"><i class="fa-solid '+gPI(e.producto)+' text-[var(--muted)] text-xs w-4 text-center"></i><span class="text-xs">'+esc(e.producto)+'</span><span class="font-mono text-[10px] text-[var(--muted)]">\u2014 '+esc(e.numeroSerie)+'</span></div>'}).join('')+'</div>':'<div class="text-xs text-[var(--muted)]">Sin EPPs</div>')+'</div>':'')+'<button class="btn btn-primary w-full justify-center mt-6 '+(r.selectedEppIds.length===0||!r.tecnicoDestinoId?'opacity-40 cursor-not-allowed':'')+'" onclick="cR()"><i class="fa-solid fa-arrows-rotate"></i> REASIGNAR '+(r.selectedEppIds.length>0?r.selectedEppIds.length:'')+' EPP'+(r.selectedEppIds.length!==1?'S':'')+'</button></div></div>'}
 window.sTO=function(id){S.reasignacion.tecnicoOrigenId=id;S.reasignacion.selectedEppIds=[];if(id===S.reasignacion.tecnicoDestinoId)S.reasignacion.tecnicoDestinoId='';ren()};
 window.sTD=function(id){S.reasignacion.tecnicoDestinoId=id;ren()};
